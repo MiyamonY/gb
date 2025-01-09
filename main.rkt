@@ -49,8 +49,8 @@
   (registers memory)
   #:transparent)
 
-(define (make-cpu #:a [a 0] #:b [b 0] #:c [c 0] #:d [d 0] #:e [e 0] #:h [h 0] #:l [l 0] #:sp [sp 0] #:pc [pc 0] #:low-power-mode [low-power-mode #f])
-  (-cpu (-registers a b c d e h l sp pc low-power-mode) (make-memory)))
+(define (make-cpu #:a [a 0] #:b [b 0] #:c [c 0] #:d [d 0] #:e [e 0] #:h [h 0] #:l [l 0] #:sp [sp 0] #:pc [pc 0] #:low-power-mode [low-power-mode #f] #:memory [memory (make-memory)])
+  (-cpu (-registers a b c d e h l sp pc low-power-mode) memory))
 
 (define (low-power-mode cpu)
   (define registers (-cpu-registers cpu))
@@ -64,8 +64,27 @@
 
   (struct-copy -cpu cpu [registers (struct-copy -registers registers [pc pc])]))
 
-(define (execute cpu clock code)
-  (match code
+(define (fetch-and-decode cpu)
+  (define pc (-registers-pc (-cpu-registers cpu)))
+
+  (define instruction (vector-ref (-cpu-memory cpu) pc))
+
+  (case instruction
+    [(#x00) '(nop)]
+    [(#x10) '(stop)]
+    [(#x01) `(ld-imm16 bc ,(vector-ref (-cpu-memory cpu) (+ pc 1)))]
+    [(#x11) `(ld-imm16 de ,(vector-ref (-cpu-memory cpu) (+ pc 1)))]
+    [(#x21) `(ld-imm16 hl ,(vector-ref (-cpu-memory cpu) (+ pc 1)))]
+    [(#x31) `(ld-imm16 sp ,(vector-ref (-cpu-memory cpu) (+ pc 1)))]
+    [(#x02) '(ld-from-a bc)]
+    [(#x12) '(ld-from-a de)]
+    [(#x22) '(ld-from-a hl)]
+    [(#x32) '(ld-from-a sp)]
+    [else (error 'fetch-and-decode "Unknown instruction@~a" instruction)])
+  )
+
+(define (execute cpu clock instruction)
+  (match instruction
     [(list 'nop)
      (values (increment-pc cpu 1) (+ 4 clock))]
     [(list 'stop)
@@ -82,10 +101,10 @@
      (let* ([registers (-cpu-registers cpu)]
             [a (-registers-a registers)]
             [addr (match r16mem
-                   [(quote bc) (-registers-bc registers)]
-                   [(quote de) (-registers-de registers)]
-                   [(quote hl) (-registers-hl registers)]
-                   [(quote sp) (-registers-sp registers)])])
+                    [(quote bc) (-registers-bc registers)]
+                    [(quote de) (-registers-de registers)]
+                    [(quote hl) (-registers-hl registers)]
+                    [(quote sp) (-registers-sp registers)])])
        (vector-set! (-cpu-memory cpu) addr a)
        (values (increment-pc cpu 1)  (+ 8 clock)))]))
 
@@ -103,124 +122,178 @@
     (check-equal? (-cpu-registers cpu) (-cpu-registers expected))
     (check-equal? (-cpu-memory cpu) (-cpu-memory expected)))
 
+  (test-case "decode nop"
+    (let* ([cpu (make-cpu)]
+           [instruction (fetch-and-decode cpu)])
+      (check-equal? instruction '(nop))))
+
+  (test-case "decode stop"
+    (let* ([cpu (make-cpu #:memory #(#x10))]
+           [instruction (fetch-and-decode cpu)])
+      (check-equal? instruction '(stop))
+      )
+    )
+
+  (test-case "decode load immediatey 16@BC"
+    (let* ([cpu (make-cpu #:memory #(#x01 #xff))]
+           [instruction (fetch-and-decode cpu)])
+      (check-equal? instruction '(ld-imm16 bc #xff))
+      )
+    )
+
+  (test-case "decode load immediatey 16@DE"
+    (let* ([cpu (make-cpu #:memory #(#x11 #xff))]
+           [instruction (fetch-and-decode cpu)])
+      (check-equal? instruction '(ld-imm16 de #xff))
+      )
+    )
+
+  (test-case "decode load immediatey 16@HL"
+    (let* ([cpu (make-cpu #:memory #(#x21 #xff))]
+           [instruction (fetch-and-decode cpu)])
+      (check-equal? instruction '(ld-imm16 hl #xff))
+      )
+    )
+
+  (test-case "decode load immediatey 16@SP"
+    (let* ([cpu (make-cpu #:memory #(#x31 #xff))]
+           [instruction (fetch-and-decode cpu)])
+      (check-equal? instruction '(ld-imm16 sp #xff))
+      )
+    )
+
+  (test-case "decode load from a to [BC]"
+    (let* ([cpu (make-cpu #:memory #(#x02))]
+           [instruction (fetch-and-decode cpu)])
+      (check-equal? instruction '(ld-from-a bc))
+      )
+    )
+
+  (test-case "decode load from a to [DE]"
+    (let* ([cpu (make-cpu #:memory #(#x12))]
+           [instruction (fetch-and-decode cpu)])
+      (check-equal? instruction '(ld-from-a de))
+      )
+    )
+
+  (test-case "decode load from a to [HL]"
+    (let* ([cpu (make-cpu #:memory #(#x22))]
+           [instruction (fetch-and-decode cpu)])
+      (check-equal? instruction '(ld-from-a hl))
+      )
+    )
+
+  (test-case "decode load from a to [SP]"
+    (let* ([cpu (make-cpu #:memory #(#x32))]
+           [instruction (fetch-and-decode cpu)])
+      (check-equal? instruction '(ld-from-a sp))
+      )
+    )
+
+  (test-case "decode error"
+    (let ([cpu (make-cpu #:memory #(#xd3))])
+      (check-exn #rx"Unknown instruction@211" (lambda () (fetch-and-decode cpu)))
+      )
+    )
+
   (test-case "nop"
-    (begin
-      (let ([cpu (make-cpu)])
-        (let-values ([(cpu clock) (execute cpu 0 '(nop))])
-          (check-cpu? cpu (-cpu (-registers 0 0 0 0 0 0 0 0 1 #f) (make-memory)))
-          (check-equal? clock 4)
-          )
+    (let ([cpu (make-cpu)])
+      (let-values ([(cpu clock) (execute cpu 0 '(nop))])
+        (check-cpu? cpu (-cpu (-registers 0 0 0 0 0 0 0 0 1 #f) (make-memory)))
+        (check-equal? clock 4)
         )
       )
     )
 
   (test-case "stop"
-    (begin
-      (let ([cpu (make-cpu)])
-        (let-values ([(cpu clock) (execute cpu 0 '(stop))])
-          (check-cpu? cpu (-cpu (-registers 0 0 0 0 0 0 0 0 1 #t) (make-memory)))
-          (check-equal? clock 4)
-          )
+    (let ([cpu (make-cpu)])
+      (let-values ([(cpu clock) (execute cpu 0 '(stop))])
+        (check-cpu? cpu (-cpu (-registers 0 0 0 0 0 0 0 0 1 #t) (make-memory)))
+        (check-equal? clock 4)
         )
       )
     )
 
   (test-case "load immediatey 16@BC"
-    (begin
-      (let ([cpu (make-cpu)])
-        (let-values ([(cpu clock) (execute cpu 0 '(ld-imm16 bc #x1234))])
-          (check-cpu? cpu (-cpu (-registers 0 #x12 #x34 0 0 0 0 0 3 #f) (make-memory)))
-          (check-equal? clock 12)
-          )
+    (let ([cpu (make-cpu)])
+      (let-values ([(cpu clock) (execute cpu 0 '(ld-imm16 bc #x1234))])
+        (check-cpu? cpu (-cpu (-registers 0 #x12 #x34 0 0 0 0 0 3 #f) (make-memory)))
+        (check-equal? clock 12)
         )
       )
     )
 
   (test-case "load immediatey 16@DE"
-    (begin
-      (let ([cpu (make-cpu)])
-        (let-values ([(cpu clock) (execute cpu 0 '(ld-imm16 de #x1234))])
-          (check-cpu? cpu (-cpu (-registers 0 0 0 #x12 #x34 0 0 0 3 #f) (make-memory)))
-          (check-equal? clock 12)
-          )
+    (let ([cpu (make-cpu)])
+      (let-values ([(cpu clock) (execute cpu 0 '(ld-imm16 de #x1234))])
+        (check-cpu? cpu (-cpu (-registers 0 0 0 #x12 #x34 0 0 0 3 #f) (make-memory)))
+        (check-equal? clock 12)
         )
       )
     )
 
   (test-case "load immediatey 16@HL"
-    (begin
-      (let ([cpu (make-cpu)])
-        (let-values ([(cpu clock) (execute cpu 0 '(ld-imm16 hl #x1234))])
-          (check-cpu? cpu (-cpu (-registers 0 0 0 0 0 #x12 #x34 0 3 #f) (make-memory)))
-          (check-equal? clock 12)
-          )
+    (let ([cpu (make-cpu)])
+      (let-values ([(cpu clock) (execute cpu 0 '(ld-imm16 hl #x1234))])
+        (check-cpu? cpu (-cpu (-registers 0 0 0 0 0 #x12 #x34 0 3 #f) (make-memory)))
+        (check-equal? clock 12)
         )
       )
     )
 
   (test-case "load immediatey 16@SP"
-    (begin
-      (let ([cpu (make-cpu)])
-        (let-values ([(cpu clock) (execute cpu 0 '(ld-imm16 sp #x1234))])
-          (check-cpu? cpu (-cpu (-registers 0 0 0 0 0 0 0 #x1234 3 #f) (make-memory)))
-          (check-equal? clock 12)
-          )
+    (let ([cpu (make-cpu)])
+      (let-values ([(cpu clock) (execute cpu 0 '(ld-imm16 sp #x1234))])
+        (check-cpu? cpu (-cpu (-registers 0 0 0 0 0 0 0 #x1234 3 #f) (make-memory)))
+        (check-equal? clock 12)
         )
       )
     )
 
   (test-case "load from A to [BC]"
-    (begin
-      (let ([cpu (make-cpu #:a #xff #:b #x01 #:c #x23)]
-            [memory(make-memory)])
-        (let-values ([(cpu clock) (execute cpu 0 '(ld-from-a bc))])
-          (begin
-            (vector-set! memory #x0123 #xff)
-            (check-cpu? cpu (-cpu (-registers #xff #x01 #x23 0 0 0 0 0 1 #f) memory))
-            (check-equal? clock 8))
-          )
+    (let ([cpu (make-cpu #:a #xff #:b #x01 #:c #x23)]
+          [memory(make-memory)])
+      (let-values ([(cpu clock) (execute cpu 0 '(ld-from-a bc))])
+        (begin
+          (vector-set! memory #x0123 #xff)
+          (check-cpu? cpu (-cpu (-registers #xff #x01 #x23 0 0 0 0 0 1 #f) memory))
+          (check-equal? clock 8))
         )
       )
     )
 
   (test-case "load from A to [DE]"
-    (begin
-      (let ([cpu (make-cpu #:a #xff #:d #x01 #:e #x23)]
-            [memory(make-memory)])
-        (let-values ([(cpu clock) (execute cpu 0 '(ld-from-a de))])
-          (begin
-            (vector-set! memory #x0123 #xff)
-            (check-cpu? cpu (-cpu (-registers #xff 0 0 #x01 #x23 0 0 0 1 #f) memory))
-            (check-equal? clock 8))
-          )
+    (let ([cpu (make-cpu #:a #xff #:d #x01 #:e #x23)]
+          [memory(make-memory)])
+      (let-values ([(cpu clock) (execute cpu 0 '(ld-from-a de))])
+        (begin
+          (vector-set! memory #x0123 #xff)
+          (check-cpu? cpu (-cpu (-registers #xff 0 0 #x01 #x23 0 0 0 1 #f) memory))
+          (check-equal? clock 8))
         )
       )
     )
 
   (test-case "load from A to [HL]"
-    (begin
-      (let ([cpu (make-cpu #:a #xff #:h #x01 #:l #x23)]
-            [memory(make-memory)])
-        (let-values ([(cpu clock) (execute cpu 0 '(ld-from-a hl))])
-          (begin
-            (vector-set! memory #x0123 #xff)
-            (check-cpu? cpu (-cpu (-registers #xff 0 0 0 0 #x01 #x23 0 1 #f) memory))
-            (check-equal? clock 8))
-          )
+    (let ([cpu (make-cpu #:a #xff #:h #x01 #:l #x23)]
+          [memory(make-memory)])
+      (let-values ([(cpu clock) (execute cpu 0 '(ld-from-a hl))])
+        (begin
+          (vector-set! memory #x0123 #xff)
+          (check-cpu? cpu (-cpu (-registers #xff 0 0 0 0 #x01 #x23 0 1 #f) memory))
+          (check-equal? clock 8))
         )
       )
     )
 
   (test-case "load from A to [sp]"
-    (begin
-      (let ([cpu (make-cpu #:a #xff #:sp #x123)]
-            [memory(make-memory)])
-        (let-values ([(cpu clock) (execute cpu 0 '(ld-from-a sp))])
-          (begin
-            (vector-set! memory #x0123 #xff)
-            (check-cpu? cpu (-cpu (-registers #xff 0 0 0 0 0 0 #x0123 1 #f) memory))
-            (check-equal? clock 8))
-          )
+    (let ([cpu (make-cpu #:a #xff #:sp #x123)]
+          [memory(make-memory)])
+      (let-values ([(cpu clock) (execute cpu 0 '(ld-from-a sp))])
+        (begin
+          (vector-set! memory #x0123 #xff)
+          (check-cpu? cpu (-cpu (-registers #xff 0 0 0 0 0 0 #x0123 1 #f) memory))
+          (check-equal? clock 8))
         )
       )
     )
