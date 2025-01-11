@@ -6,17 +6,17 @@
 (define (make-memory) (make-vector (k 64)))
 
 (struct -cpu
-  (a
-   b
-   c
-   d
-   e
-   h
-   l
-   f
-   sp
-   pc
-   low-power-mode
+  ([a #:mutable]
+   [b #:mutable]
+   [c #:mutable]
+   [d #:mutable]
+   [e #:mutable]
+   [h #:mutable]
+   [l #:mutable]
+   [f #:mutable]
+   [sp #:mutable]
+   [pc #:mutable]
+   [low-power-mode #:mutable]
    memory)
   #:transparent)
 
@@ -28,18 +28,19 @@
     [(_ reg-hi reg-lo)
      (with-syntax ([id-get (format-id #'reg-hi "-cpu-~a~a" #'reg-hi #'reg-lo)]
                    [id-set (format-id #'reg-hi "load-~a~a" #'reg-hi #'reg-lo)]
-                   [high-register (format-id #'reg-hi "~a" #'reg-hi)]
-                   [-registers-high-register (format-id #'reg-hi "-cpu-~a" #'reg-hi)]
-                   [low-register (format-id #'reg-lo "~a" #'reg-lo)]
-                   [-registers-low-register (format-id #'reg-lo "-cpu-~a" #'reg-lo)])
+                   [set-high-register! (format-id #'reg-hi "set--cpu-~a!" #'reg-hi)]
+                   [high-register (format-id #'reg-hi "-cpu-~a" #'reg-hi)]
+                   [set-low-register! (format-id #'reg-lo "set--cpu-~a!" #'reg-lo)]
+                   [low-register (format-id #'reg-lo "-cpu-~a" #'reg-lo)])
        #'(begin
            (define (id-get cpu)
-             (+ (* (-registers-high-register cpu) (expt 2 8)) (-registers-low-register cpu)))
+             (+ (* (high-register cpu) (expt 2 8)) (low-register cpu)))
 
            (define (id-set cpu imm16)
              (define high (quotient imm16 (expt 2 8)))
              (define low (remainder imm16 (expt 2 8)))
-             (struct-copy -cpu cpu [high-register high] [low-register low]))))]))
+             (set-high-register! cpu high)
+             (set-low-register! cpu low))))]))
 
 (define-16bit-register b c)
 
@@ -48,10 +49,13 @@
 (define-16bit-register h l)
 
 (define (load-sp cpu imm16)
-  (struct-copy -cpu cpu [sp imm16]))
+  (set--cpu-sp! cpu imm16))
 
 (define (load-pc cpu imm16)
-  (struct-copy -cpu cpu [pc imm16]))
+  (set--cpu-pc! cpu imm16))
+
+(define (low-power-mode cpu)
+  (set--cpu-low-power-mode! cpu #t))
 
 (define-syntax (define-flag stx)
   (syntax-case stx ()
@@ -62,13 +66,11 @@
        #'(begin
            (define (id-set cpu)
              (define flag (-cpu-f cpu))
-
-             (struct-copy -cpu cpu [f (bitwise-ior flag (arithmetic-shift #x01 bit))]))
+             (set--cpu-f! cpu (bitwise-ior flag (arithmetic-shift #x01 bit))))
 
            (define (id-clear cpu)
              (define flag (-cpu-f cpu))
-
-             (struct-copy -cpu cpu [f (bitwise-and flag (bitwise-xor #xff (arithmetic-shift #x01 bit)))]))))]))
+             (set--cpu-f! cpu (bitwise-and flag (bitwise-xor #xff (arithmetic-shift #x01 bit)))))))]))
 
 (define-flag z 7)
 
@@ -103,6 +105,8 @@
 
 (define-increment/decrement-8bit-register a)
 
+(define-increment/decrement-8bit-register b)
+
 (define-syntax (define-increment/decrement-16bit-register stx)
   (syntax-case stx ()
     [(_ r16)
@@ -132,9 +136,6 @@
 
 (define-increment/decrement-16bit-register pc)
 
-(define (low-power-mode cpu)
-  (struct-copy -cpu cpu [low-power-mode #t]))
-
 (define (fetch-and-decode cpu)
   (define pc (-cpu-pc cpu))
 
@@ -161,34 +162,40 @@
 (define (execute cpu clock instruction)
   (match instruction
     [(list 'nop)
-     (values (increment-pc cpu 1) (+ 4 clock))]
+     (increment-pc cpu 1)
+     (+ 4 clock)]
     [(list 'stop)
-     (values (increment-pc (low-power-mode cpu) 1) (+ 4 clock))]
+     (low-power-mode cpu)
+     (increment-pc cpu 1)
+     (+ 4 clock)]
     [(list 'ld-imm16 r16mem imm16)
-     (define cpu+ (match r16mem
-                   [(quote bc) (load-bc cpu imm16)]
-                   [(quote de) (load-de cpu imm16)]
-                   [(quote hl) (load-hl cpu imm16)]
-                   [(quote sp) (load-sp cpu imm16)]))
-     (values (increment-pc cpu+ 3) (+ 12 clock))]
+     (match r16mem
+       [(quote bc) (load-bc cpu imm16)]
+       [(quote de) (load-de cpu imm16)]
+       [(quote hl) (load-hl cpu imm16)]
+       [(quote sp) (load-sp cpu imm16)])
+     (increment-pc cpu 3)
+     (+ 12 clock)]
     [(list 'ld-from-a r16mem)
      (define a (-cpu-a cpu))
-     (define-values (addr cpu+)
+     (define addr
        (match r16mem
-         [(quote bc) (values (-cpu-bc cpu) cpu)]
-         [(quote de) (values (-cpu-de cpu) cpu)]
-         [(quote hl+) (values (-cpu-hl cpu) (increment-hl cpu))]
-         [(quote hl-) (values (-cpu-hl cpu) (decrement-hl cpu))]))
+         [(quote bc) (-cpu-bc cpu)]
+         [(quote de) (-cpu-de cpu)]
+         [(quote hl+) (let [(hl (-cpu-hl cpu))] (increment-hl cpu) hl)]
+         [(quote hl-) (let [(hl (-cpu-hl cpu))] (decrement-hl cpu) hl)]))
 
-     (vector-set! (-cpu-memory cpu+) addr a)
-     (values (increment-pc cpu+ 1)  (+ 8 clock))]
+     (vector-set! (-cpu-memory cpu) addr a)
+     (increment-pc cpu 1)
+     (+ 8 clock)]
     [(list 'inc r16)
-     (define cpu+ (match r16
-                   [(quote bc) (increment-bc cpu)]
-                   [(quote de) (increment-de cpu)]
-                   [(quote hl) (increment-hl cpu)]
-                   [(quote sp) (increment-sp cpu)]))
-     (values (increment-pc cpu+ 1) (+ 8 clock))]))
+     (match r16
+       [(quote bc) (increment-bc cpu)]
+       [(quote de) (increment-de cpu)]
+       [(quote hl) (increment-hl cpu)]
+       [(quote sp) (increment-sp cpu)])
+     (increment-pc cpu 1)
+     (+ 8 clock)]))
 
 (define (main)
   (define cpu (make-cpu))
@@ -307,7 +314,7 @@
 
   (test-case "nop"
     (let ([cpu (make-cpu)])
-      (let-values ([(cpu clock) (execute cpu 0 '(nop))])
+      (let ([clock (execute cpu 0 '(nop))])
         (check-cpu? cpu (make-cpu #:pc #x0001))
         (check-equal? clock 4)
         )
@@ -316,7 +323,7 @@
 
   (test-case "stop"
     (let ([cpu (make-cpu)])
-      (let-values ([(cpu clock) (execute cpu 0 '(stop))])
+      (let ([clock (execute cpu 0 '(stop))])
         (check-cpu? cpu (make-cpu #:pc #x0001 #:low-power-mode #t))
         (check-equal? clock 4)
         )
@@ -324,32 +331,34 @@
     )
 
   (test-case "clear flag z"
-    (let ([cpu (clear-flag-z (make-cpu #:f #xff))])
+    (let ([cpu (make-cpu #:f #xff)])
+      (clear-flag-z cpu)
       (check-cpu? cpu (make-cpu #:f #x7f ))
       )
     )
 
   (test-case "set flag z"
-    (let ([cpu (set-flag-z (make-cpu #:f #x00))])
+    (let ([cpu (make-cpu #:f #x00)])
+      (set-flag-z cpu)
       (check-cpu? cpu (make-cpu #:f #x80))
       )
     )
 
   (test-case "clear flag n"
-    (let ([cpu (clear-flag-n (make-cpu #:f #xff))])
+    (let ([cpu (make-cpu #:f #xff)])
+      (clear-flag-n cpu)
       (check-cpu? cpu (make-cpu #:f #xbf))
       )
     )
 
   (test-case "set flag n"
-    (let ([cpu (set-flag-n (make-cpu #:f #x00))])
-      (check-cpu? cpu (make-cpu #:f #x40))
-      )
-    )
+    (let ([cpu (make-cpu #:f #x00)])
+      (set-flag-n cpu)
+      (check-cpu? cpu (make-cpu #:f #x40))))
 
   (test-case "load immediatey 16@BC"
     (let ([cpu (make-cpu)])
-      (let-values ([(cpu clock) (execute cpu 0 '(ld-imm16 bc #x1234))])
+      (let ([clock (execute cpu 0 '(ld-imm16 bc #x1234))])
         (check-cpu? cpu (make-cpu #:b #x12 #:c #x34 #:pc #x0003))
         (check-equal? clock 12)
         )
@@ -358,7 +367,7 @@
 
   (test-case "load immediatey 16@DE"
     (let ([cpu (make-cpu)])
-      (let-values ([(cpu clock) (execute cpu 0 '(ld-imm16 de #x1234))])
+      (let ([clock (execute cpu 0 '(ld-imm16 de #x1234))])
         (check-cpu? cpu (make-cpu #:d #x12 #:e #x34 #:pc #x0003))
         (check-equal? clock 12)
         )
@@ -367,7 +376,7 @@
 
   (test-case "load immediatey 16@HL"
     (let ([cpu (make-cpu)])
-      (let-values ([(cpu clock) (execute cpu 0 '(ld-imm16 hl #x1234))])
+      (let ([clock (execute cpu 0 '(ld-imm16 hl #x1234))])
         (check-cpu? cpu (make-cpu #:h #x12 #:l #x34  #:pc #x0003))
         (check-equal? clock 12)
         )
@@ -376,7 +385,7 @@
 
   (test-case "load immediatey 16@SP"
     (let ([cpu (make-cpu)])
-      (let-values ([(cpu clock) (execute cpu 0 '(ld-imm16 sp #x1234))])
+      (let ([clock (execute cpu 0 '(ld-imm16 sp #x1234))])
         (check-cpu? cpu (make-cpu #:sp #x1234 #:pc #x0003))
         (check-equal? clock 12)
         )
@@ -386,7 +395,7 @@
   (test-case "load from A to [BC]"
     (let ([cpu (make-cpu #:a #xff #:b #x01 #:c #x23)]
           [memory(make-memory)])
-      (let-values ([(cpu clock) (execute cpu 0 '(ld-from-a bc))])
+      (let ([clock (execute cpu 0 '(ld-from-a bc))])
         (begin
           (vector-set! memory #x0123 #xff)
           (check-cpu? cpu (make-cpu #:a #xff #:b #x01 #:c #x23 #:pc #x0001 #:memory memory))
@@ -398,7 +407,7 @@
   (test-case "load from A to [DE]"
     (let ([cpu (make-cpu #:a #xff #:d #x01 #:e #x23)]
           [memory(make-memory)])
-      (let-values ([(cpu clock) (execute cpu 0 '(ld-from-a de))])
+      (let ([clock (execute cpu 0 '(ld-from-a de))])
         (begin
           (vector-set! memory #x0123 #xff)
           (check-cpu? cpu (make-cpu #:a #xff #:d #x01 #:e #x23 #:pc #x0001 #:memory memory))
@@ -410,7 +419,7 @@
   (test-case "load from A to [HL+]"
     (let ([cpu (make-cpu #:a #xff #:h #x01 #:l #x23)]
           [memory(make-memory)])
-      (let-values ([(cpu clock) (execute cpu 0 '(ld-from-a hl+))])
+      (let ([clock (execute cpu 0 '(ld-from-a hl+))])
         (begin
           (vector-set! memory #x0123 #xff)
           (check-cpu? cpu (make-cpu  #:a #xff #:h #x01 #:l #x24  #:pc #x0001  #:memory memory))
@@ -422,7 +431,7 @@
   (test-case "load from A to [HL-]"
     (let ([cpu (make-cpu #:a #xff #:h #x1 #:l #x23)]
           [memory (make-memory)])
-      (let-values ([(cpu clock) (execute cpu 0 '(ld-from-a hl-))])
+      (let ([clock (execute cpu 0 '(ld-from-a hl-))])
         (begin
           (vector-set! memory #x0123 #xff)
           (check-cpu? cpu (make-cpu #:a #xff #:h #x01 #:l #x22 #:pc 1 #:memory memory))
@@ -433,7 +442,7 @@
 
   (test-case "increment BC"
     (let ([cpu (make-cpu #:c #xff)])
-      (let-values ([(cpu clock) (execute cpu 0 '(inc bc))])
+      (let ([clock (execute cpu 0 '(inc bc))])
         (begin
           (check-cpu? cpu (make-cpu #:b #x01 #:c #x00 #:pc #x0001))
           (check-equal? clock 8))
@@ -443,7 +452,7 @@
 
   (test-case "increment DE"
     (let ([cpu (make-cpu #:e #xff)])
-      (let-values ([(cpu clock) (execute cpu 0 '(inc de))])
+      (let ([clock (execute cpu 0 '(inc de))])
         (begin
           (check-cpu? cpu (make-cpu #:d #x01 #:e #x00 #:pc #x0001))
           (check-equal? clock 8))
@@ -453,7 +462,7 @@
 
   (test-case "increment HL"
     (let ([cpu (make-cpu #:l #xff)])
-      (let-values ([(cpu clock) (execute cpu 0 '(inc hl))])
+      (let ([clock (execute cpu 0 '(inc hl))])
         (begin
           (check-cpu? cpu (make-cpu #:h #x01 #:l #x00 #:pc #x0001))
           (check-equal? clock 8))
@@ -463,7 +472,7 @@
 
   (test-case "increment SP"
     (let ([cpu (make-cpu #:sp #xffff)])
-      (let-values ([(cpu clock) (execute cpu 0 '(inc sp))])
+      (let ([clock (execute cpu 0 '(inc sp))])
         (begin
           (check-cpu? cpu (make-cpu #:pc #x0001 #:sp 1))
           (check-equal? clock 8))
