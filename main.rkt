@@ -64,6 +64,20 @@
 
   (struct-copy -cpu cpu [registers (struct-copy -registers registers [pc pc])]))
 
+(define (increment-hl cpu)
+  (define registers (-cpu-registers cpu))
+
+  (define hl++ (+ (-registers-hl registers) 1))
+
+  (struct-copy -cpu cpu [registers (load-hl registers hl++)]))
+
+(define (decriment-hl cpu)
+  (define registers (-cpu-registers cpu))
+
+  (define hl-- (- (-registers-hl registers) 1))
+
+  (struct-copy -cpu cpu [registers (load-hl registers hl--)]))
+
 (define (fetch-and-decode cpu)
   (define pc (-registers-pc (-cpu-registers cpu)))
 
@@ -78,8 +92,8 @@
     [(#x31) `(ld-imm16 sp ,(vector-ref (-cpu-memory cpu) (+ pc 1)))]
     [(#x02) '(ld-from-a bc)]
     [(#x12) '(ld-from-a de)]
-    [(#x22) '(ld-from-a hl)]
-    [(#x32) '(ld-from-a sp)]
+    [(#x22) '(ld-from-a hl+)]
+    [(#x32) '(ld-from-a hl-)]
     [else (error 'fetch-and-decode "Unknown instruction@~a" instruction)])
   )
 
@@ -90,23 +104,25 @@
     [(list 'stop)
      (values (increment-pc (low-power-mode cpu) 1) (+ 4 clock))]
     [(list 'ld-imm16 r16mem imm16)
-     (let* ([registers (-cpu-registers cpu)]
-            [updated-registers (match r16mem
-                                 [(quote bc) (load-bc registers imm16)]
-                                 [(quote de) (load-de registers imm16)]
-                                 [(quote hl) (load-hl registers imm16)]
-                                 [(quote sp) (load-sp registers imm16)])])
-       (values (increment-pc (struct-copy -cpu cpu [registers updated-registers]) 3) (+ 12 clock)))]
+     (define registers (-cpu-registers cpu))
+     (define registers+ (match r16mem
+                          [(quote bc) (load-bc registers imm16)]
+                          [(quote de) (load-de registers imm16)]
+                          [(quote hl) (load-hl registers imm16)]
+                          [(quote sp) (load-sp registers imm16)]))
+     (values (increment-pc (struct-copy -cpu cpu [registers registers+]) 3) (+ 12 clock))]
     [(list 'ld-from-a r16mem)
-     (let* ([registers (-cpu-registers cpu)]
-            [a (-registers-a registers)]
-            [addr (match r16mem
-                    [(quote bc) (-registers-bc registers)]
-                    [(quote de) (-registers-de registers)]
-                    [(quote hl) (-registers-hl registers)]
-                    [(quote sp) (-registers-sp registers)])])
-       (vector-set! (-cpu-memory cpu) addr a)
-       (values (increment-pc cpu 1)  (+ 8 clock)))]))
+     (define registers (-cpu-registers cpu))
+     (define a (-registers-a registers))
+     (define-values (addr cpu+)
+       (match r16mem
+         [(quote bc) (values (-registers-bc registers) cpu)]
+         [(quote de) (values (-registers-de registers) cpu)]
+         [(quote hl+) (values (-registers-hl registers) (increment-hl cpu))]
+         [(quote hl-) (values (-registers-hl registers) (decriment-hl cpu))]))
+
+     (vector-set! (-cpu-memory cpu+) addr a)
+     (values (increment-pc cpu+ 1)  (+ 8 clock))]))
 
 (define (main)
   (define cpu (cpu (-registers) (make-memory)))
@@ -176,17 +192,17 @@
       )
     )
 
-  (test-case "decode load from a to [HL]"
+  (test-case "decode load from a to [HL+]"
     (let* ([cpu (make-cpu #:memory #(#x22))]
            [instruction (fetch-and-decode cpu)])
-      (check-equal? instruction '(ld-from-a hl))
+      (check-equal? instruction '(ld-from-a hl+))
       )
     )
 
-  (test-case "decode load from a to [SP]"
+  (test-case "decode load from a to [HL-]"
     (let* ([cpu (make-cpu #:memory #(#x32))]
            [instruction (fetch-and-decode cpu)])
-      (check-equal? instruction '(ld-from-a sp))
+      (check-equal? instruction '(ld-from-a hl-))
       )
     )
 
@@ -274,25 +290,25 @@
       )
     )
 
-  (test-case "load from A to [HL]"
+  (test-case "load from A to [HL+]"
     (let ([cpu (make-cpu #:a #xff #:h #x01 #:l #x23)]
           [memory(make-memory)])
-      (let-values ([(cpu clock) (execute cpu 0 '(ld-from-a hl))])
+      (let-values ([(cpu clock) (execute cpu 0 '(ld-from-a hl+))])
         (begin
           (vector-set! memory #x0123 #xff)
-          (check-cpu? cpu (-cpu (-registers #xff 0 0 0 0 #x01 #x23 0 1 #f) memory))
+          (check-cpu? cpu (-cpu (-registers #xff 0 0 0 0 #x01 #x24 0 1 #f) memory))
           (check-equal? clock 8))
         )
       )
     )
 
-  (test-case "load from A to [sp]"
-    (let ([cpu (make-cpu #:a #xff #:sp #x123)]
-          [memory(make-memory)])
-      (let-values ([(cpu clock) (execute cpu 0 '(ld-from-a sp))])
+  (test-case "load from A to [HL-]"
+    (let ([cpu (make-cpu #:a #xff #:h #x1 #:l #x23)]
+          [memory (make-memory)])
+      (let-values ([(cpu clock) (execute cpu 0 '(ld-from-a hl-))])
         (begin
           (vector-set! memory #x0123 #xff)
-          (check-cpu? cpu (-cpu (-registers #xff 0 0 0 0 0 0 #x0123 1 #f) memory))
+          (check-cpu? cpu (-cpu (-registers #xff 0 0 0 0 #x01 #x22 0 1 #f) memory))
           (check-equal? clock 8))
         )
       )
