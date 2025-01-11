@@ -3,7 +3,9 @@
 
 (define (k size) (* size 1024))
 
-(struct -registers
+(define (make-memory) (make-vector (k 64)))
+
+(struct -cpu
   (a
    b
    c
@@ -14,26 +16,30 @@
    f
    sp
    pc
-   low-power-mode)
+   low-power-mode
+   memory)
   #:transparent)
+
+(define (make-cpu #:a [a 0] #:b [b 0] #:c [c 0] #:d [d 0] #:e [e 0] #:h [h 0] #:l [l 0] #:f [f 0] #:sp [sp 0] #:pc [pc 0] #:low-power-mode [low-power-mode #f] #:memory [memory (make-memory)])
+  (-cpu a b c d e h l f sp pc low-power-mode memory))
 
 (define-syntax (define-16bit-register stx)
   (syntax-case stx ()
     [(_ reg-hi reg-lo)
-     (with-syntax ([id-get (format-id #'reg-hi "-registers-~a~a" #'reg-hi #'reg-lo)]
+     (with-syntax ([id-get (format-id #'reg-hi "-cpu-~a~a" #'reg-hi #'reg-lo)]
                    [id-set (format-id #'reg-hi "load-~a~a" #'reg-hi #'reg-lo)]
                    [high-register (format-id #'reg-hi "~a" #'reg-hi)]
-                   [-registers-high-register (format-id #'reg-hi "-registers-~a" #'reg-hi)]
+                   [-registers-high-register (format-id #'reg-hi "-cpu-~a" #'reg-hi)]
                    [low-register (format-id #'reg-lo "~a" #'reg-lo)]
-                   [-registers-low-register (format-id #'reg-lo "-registers-~a" #'reg-lo)])
+                   [-registers-low-register (format-id #'reg-lo "-cpu-~a" #'reg-lo)])
        #'(begin
-           (define (id-get registers)
-             (+ (* (-registers-high-register registers) (expt 2 8)) (-registers-low-register registers)))
+           (define (id-get cpu)
+             (+ (* (-registers-high-register cpu) (expt 2 8)) (-registers-low-register cpu)))
 
-           (define (id-set registers imm16)
+           (define (id-set cpu imm16)
              (define high (quotient imm16 (expt 2 8)))
              (define low (remainder imm16 (expt 2 8)))
-             (struct-copy -registers registers [high-register high] [low-register low]))))]))
+             (struct-copy -cpu cpu [high-register high] [low-register low]))))]))
 
 (define-16bit-register b c)
 
@@ -41,20 +47,11 @@
 
 (define-16bit-register h l)
 
-(define (load-sp registers imm16)
-  (struct-copy -registers registers [sp imm16]))
+(define (load-sp cpu imm16)
+  (struct-copy -cpu cpu [sp imm16]))
 
-(define (load-pc registers imm16)
-  (struct-copy -registers registers [pc imm16]))
-
-(define (make-memory) (make-vector (k 64)))
-
-(struct -cpu
-  (registers memory)
-  #:transparent)
-
-(define (make-cpu #:a [a 0] #:b [b 0] #:c [c 0] #:d [d 0] #:e [e 0] #:h [h 0] #:l [l 0] #:f [f 0] #:sp [sp 0] #:pc [pc 0] #:low-power-mode [low-power-mode #f] #:memory [memory (make-memory)])
-  (-cpu (-registers a b c d e h l f sp pc low-power-mode) memory))
+(define (load-pc cpu imm16)
+  (struct-copy -cpu cpu [pc imm16]))
 
 (define-syntax (define-flag stx)
   (syntax-case stx ()
@@ -64,18 +61,14 @@
 
        #'(begin
            (define (id-set cpu)
-             (define registers (-cpu-registers cpu))
+             (define flag (-cpu-f cpu))
 
-             (define flag (-registers-f registers))
-
-             (struct-copy -cpu cpu [registers (struct-copy -registers registers [f (bitwise-ior flag (arithmetic-shift #x01 bit))])]))
+             (struct-copy -cpu cpu [f (bitwise-ior flag (arithmetic-shift #x01 bit))]))
 
            (define (id-clear cpu)
-             (define registers (-cpu-registers cpu))
+             (define flag (-cpu-f cpu))
 
-             (define flag (-registers-f registers))
-
-             (struct-copy -cpu cpu [registers (struct-copy -registers registers [f (bitwise-and flag (bitwise-xor #xff (arithmetic-shift #x01 bit)))])]))))]))
+             (struct-copy -cpu cpu [f (bitwise-and flag (bitwise-xor #xff (arithmetic-shift #x01 bit)))]))))]))
 
 (define-flag z 7)
 
@@ -88,54 +81,46 @@
 (define-syntax (define-increment/decrement-8bit-register stx)
   (syntax-case stx ()
     [(_ r8)
-     (with-syntax ([id-access-register (format-id #'r8 "-registers-~a" #'r8)]
-                   [id-load-register (format-id #'r8 "-registers-~a" #'r8)]
+     (with-syntax ([id-access-register (format-id #'r8 "-cpu-~a" #'r8)]
+                   [id-load-register (format-id #'r8 "-cpu-~a" #'r8)]
                    [id-increnment (format-id #'r8 "increment-~a" #'r8)]
                    [id-decrement (format-id #'r8 "decrement-~a" #'r8)])
 
        #'(begin
            (define (id-increnment cpu [val 1])
-             (define registers (-cpu-registers cpu))
-
-             (define r8+n (remainder (+ (id-access-register registers) val) #xffff))
+             (define r8+n (remainder (+ (id-access-register cpu) val) #xffff))
 
              (define cpu (if (= r8+n 0) (set-flag-z cpu) (clear-flag-z cpu)))
 
-             (struct-copy -cpu cpu [registers (id-load-register registers r8+n)]))
+             (id-load-register cpu r8+n))
 
            (define (id-decrement cpu [val 1])
-             (define registers (-cpu-registers cpu))
-
-             (define r8-n (remainder (+ (- (id-access-register registers) val) #xffff) #xffff))
+             (define r8-n (remainder (+ (- (id-access-register cpu) val) #xffff) #xffff))
 
              (define cpu (if (= r8-n 0) (set-flag-z cpu) (clear-flag-z cpu)))
 
-             (struct-copy -cpu  [registers (id-load-register registers r8-n)]))))]))
+             (id-load-register cpu r8-n))))]))
 
 (define-increment/decrement-8bit-register a)
 
 (define-syntax (define-increment/decrement-16bit-register stx)
   (syntax-case stx ()
     [(_ r16)
-     (with-syntax ([id-access-register (format-id #'r16 "-registers-~a" #'r16)]
+     (with-syntax ([id-access-register (format-id #'r16 "-cpu-~a" #'r16)]
                    [id-load-register (format-id #'r16 "load-~a" #'r16)]
                    [id-increnment (format-id #'r16 "increment-~a" #'r16)]
                    [id-decrement (format-id #'r16 "decrement-~a" #'r16)])
 
        #'(begin
            (define (id-increnment cpu [val 1])
-             (define registers (-cpu-registers cpu))
+             (define r16+n (remainder (+ (id-access-register cpu) val) #xffff))
 
-             (define r16+n (remainder (+ (id-access-register registers) val) #xffff))
-
-             (struct-copy -cpu cpu [registers (id-load-register registers r16+n)]))
+             (id-load-register cpu r16+n))
 
            (define (id-decrement cpu [val 1])
-             (define registers (-cpu-registers cpu))
+             (define r16-n (remainder (+ (- (id-access-register cpu) val) #xffff) #xffff))
 
-             (define r16-n (remainder (+ (- (id-access-register registers) val) #xffff) #xffff))
-
-             (struct-copy -cpu cpu [registers (id-load-register registers r16-n)]))))]))
+             (id-load-register cpu r16-n))))]))
 
 (define-increment/decrement-16bit-register bc)
 
@@ -148,12 +133,10 @@
 (define-increment/decrement-16bit-register pc)
 
 (define (low-power-mode cpu)
-  (define registers (-cpu-registers cpu))
-
-  (struct-copy -cpu cpu [registers (struct-copy -registers registers [low-power-mode #t])]))
+  (struct-copy -cpu cpu [low-power-mode #t]))
 
 (define (fetch-and-decode cpu)
-  (define pc (-registers-pc (-cpu-registers cpu)))
+  (define pc (-cpu-pc cpu))
 
   (define instruction (vector-ref (-cpu-memory cpu) pc))
 
@@ -182,22 +165,20 @@
     [(list 'stop)
      (values (increment-pc (low-power-mode cpu) 1) (+ 4 clock))]
     [(list 'ld-imm16 r16mem imm16)
-     (define registers (-cpu-registers cpu))
-     (define registers+ (match r16mem
-                          [(quote bc) (load-bc registers imm16)]
-                          [(quote de) (load-de registers imm16)]
-                          [(quote hl) (load-hl registers imm16)]
-                          [(quote sp) (load-sp registers imm16)]))
-     (values (increment-pc (struct-copy -cpu cpu [registers registers+]) 3) (+ 12 clock))]
+     (define cpu+ (match r16mem
+                   [(quote bc) (load-bc cpu imm16)]
+                   [(quote de) (load-de cpu imm16)]
+                   [(quote hl) (load-hl cpu imm16)]
+                   [(quote sp) (load-sp cpu imm16)]))
+     (values (increment-pc cpu+ 3) (+ 12 clock))]
     [(list 'ld-from-a r16mem)
-     (define registers (-cpu-registers cpu))
-     (define a (-registers-a registers))
+     (define a (-cpu-a cpu))
      (define-values (addr cpu+)
        (match r16mem
-         [(quote bc) (values (-registers-bc registers) cpu)]
-         [(quote de) (values (-registers-de registers) cpu)]
-         [(quote hl+) (values (-registers-hl registers) (increment-hl cpu))]
-         [(quote hl-) (values (-registers-hl registers) (decrement-hl cpu))]))
+         [(quote bc) (values (-cpu-bc cpu) cpu)]
+         [(quote de) (values (-cpu-de cpu) cpu)]
+         [(quote hl+) (values (-cpu-hl cpu) (increment-hl cpu))]
+         [(quote hl-) (values (-cpu-hl cpu) (decrement-hl cpu))]))
 
      (vector-set! (-cpu-memory cpu+) addr a)
      (values (increment-pc cpu+ 1)  (+ 8 clock))]
@@ -210,7 +191,7 @@
      (values (increment-pc cpu+ 1) (+ 8 clock))]))
 
 (define (main)
-  (define cpu (cpu (-registers) (make-memory)))
+  (define cpu (make-cpu))
 
   (define clock 0)
 
@@ -220,8 +201,7 @@
   (require rackunit)
 
   (define (check-cpu? cpu expected)
-    (check-equal? (-cpu-registers cpu) (-cpu-registers expected))
-    (check-equal? (-cpu-memory cpu) (-cpu-memory expected)))
+    (check-equal? cpu expected))
 
   (test-case "decode nop"
     (let* ([cpu (make-cpu)]
