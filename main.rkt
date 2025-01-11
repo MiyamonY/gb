@@ -43,6 +43,9 @@
 (define (load-sp registers imm16)
   (struct-copy -registers registers [sp imm16]))
 
+(define (load-pc registers imm16)
+  (struct-copy -registers registers [pc imm16]))
+
 (define (make-memory) (make-vector (k 64)))
 
 (struct -cpu
@@ -57,26 +60,38 @@
 
   (struct-copy -cpu cpu [registers (struct-copy -registers registers [low-power-mode #t])]))
 
-(define (increment-pc cpu step)
-  (define registers (-cpu-registers cpu))
+(define-syntax (define-increment/decrement-register stx)
+  (syntax-case stx ()
+    [(_ r16)
+     (with-syntax ([id-access-register (format-id #'r16 "-registers-~a" #'r16)]
+                   [id-load-register (format-id #'r16 "load-~a" #'r16)]
+                   [id-increnment (format-id #'r16 "increment-~a" #'r16)]
+                   [id-decrement (format-id #'r16 "decrement-~a" #'r16)])
 
-  (define pc (+ step (-registers-pc registers)))
+       #'(begin
+           (define (id-increnment cpu [val 1])
+             (define registers (-cpu-registers cpu))
 
-  (struct-copy -cpu cpu [registers (struct-copy -registers registers [pc pc])]))
+             (define r16++ (remainder (+ (id-access-register registers) val) #xffff))
 
-(define (increment-hl cpu)
-  (define registers (-cpu-registers cpu))
+             (struct-copy -cpu cpu [registers (id-load-register registers r16++)]))
 
-  (define hl++ (+ (-registers-hl registers) 1))
+           (define (id-decrement cpu [val 1])
+             (define registers (-cpu-registers cpu))
 
-  (struct-copy -cpu cpu [registers (load-hl registers hl++)]))
+             (define r16-- (remainder (+ (- (id-access-register registers) val) #xffff) #xffff))
 
-(define (decriment-hl cpu)
-  (define registers (-cpu-registers cpu))
+             (struct-copy -cpu cpu [registers (id-load-register registers r16--)]))))]))
 
-  (define hl-- (- (-registers-hl registers) 1))
+(define-increment/decrement-register bc)
 
-  (struct-copy -cpu cpu [registers (load-hl registers hl--)]))
+(define-increment/decrement-register de)
+
+(define-increment/decrement-register hl)
+
+(define-increment/decrement-register sp)
+
+(define-increment/decrement-register pc)
 
 (define (fetch-and-decode cpu)
   (define pc (-registers-pc (-cpu-registers cpu)))
@@ -94,6 +109,10 @@
     [(#x12) '(ld-from-a de)]
     [(#x22) '(ld-from-a hl+)]
     [(#x32) '(ld-from-a hl-)]
+    [(#x03) '(inc bc)]
+    [(#x13) '(inc de)]
+    [(#x23) '(inc hl)]
+    [(#x33) '(inc sp)]
     [else (error 'fetch-and-decode "Unknown instruction@~a" instruction)])
   )
 
@@ -119,10 +138,17 @@
          [(quote bc) (values (-registers-bc registers) cpu)]
          [(quote de) (values (-registers-de registers) cpu)]
          [(quote hl+) (values (-registers-hl registers) (increment-hl cpu))]
-         [(quote hl-) (values (-registers-hl registers) (decriment-hl cpu))]))
+         [(quote hl-) (values (-registers-hl registers) (decrement-hl cpu))]))
 
      (vector-set! (-cpu-memory cpu+) addr a)
-     (values (increment-pc cpu+ 1)  (+ 8 clock))]))
+     (values (increment-pc cpu+ 1)  (+ 8 clock))]
+    [(list 'inc r16)
+     (define cpu+ (match r16
+                   [(quote bc) (increment-bc cpu)]
+                   [(quote de) (increment-de cpu)]
+                   [(quote hl) (increment-hl cpu)]
+                   [(quote sp) (increment-sp cpu)]))
+     (values (increment-pc cpu+ 1) (+ 8 clock))]))
 
 (define (main)
   (define cpu (cpu (-registers) (make-memory)))
@@ -203,6 +229,34 @@
     (let* ([cpu (make-cpu #:memory #(#x32))]
            [instruction (fetch-and-decode cpu)])
       (check-equal? instruction '(ld-from-a hl-))
+      )
+    )
+
+  (test-case "increment BC"
+    (let* ([cpu (make-cpu #:memory #(#x03))]
+           [instruction (fetch-and-decode cpu)])
+      (check-equal? instruction '(inc bc))
+      )
+    )
+
+  (test-case "increment DE"
+    (let* ([cpu (make-cpu #:memory #(#x13))]
+           [instruction (fetch-and-decode cpu)])
+      (check-equal? instruction '(inc de))
+      )
+    )
+
+  (test-case "increment HL"
+    (let* ([cpu (make-cpu #:memory #(#x23))]
+           [instruction (fetch-and-decode cpu)])
+      (check-equal? instruction '(inc hl))
+      )
+    )
+
+  (test-case "increment SP"
+    (let* ([cpu (make-cpu #:memory #(#x33))]
+           [instruction (fetch-and-decode cpu)])
+      (check-equal? instruction '(inc sp))
       )
     )
 
@@ -309,6 +363,50 @@
         (begin
           (vector-set! memory #x0123 #xff)
           (check-cpu? cpu (-cpu (-registers #xff 0 0 0 0 #x01 #x22 0 1 #f) memory))
+          (check-equal? clock 8))
+        )
+      )
+    )
+
+  (test-case "increment BC"
+    (let ([cpu (make-cpu #:c #xff)]
+          [memory (make-memory)])
+      (let-values ([(cpu clock) (execute cpu 0 '(inc bc))])
+        (begin
+          (check-cpu? cpu (-cpu (-registers 0 #x01 #x00 0 0 0 0 0 1 #f) memory))
+          (check-equal? clock 8))
+        )
+      )
+    )
+
+  (test-case "increment DE"
+    (let ([cpu (make-cpu #:e #xff)]
+          [memory (make-memory)])
+      (let-values ([(cpu clock) (execute cpu 0 '(inc de))])
+        (begin
+          (check-cpu? cpu (-cpu (-registers 0 0 0 #x01 0 0 0 0 1 #f) memory))
+          (check-equal? clock 8))
+        )
+      )
+    )
+
+  (test-case "increment HL"
+    (let ([cpu (make-cpu #:l #xff)]
+          [memory (make-memory)])
+      (let-values ([(cpu clock) (execute cpu 0 '(inc hl))])
+        (begin
+          (check-cpu? cpu (-cpu (-registers 0 0 0 0 0 #x01 #x00 0 1 #f) memory))
+          (check-equal? clock 8))
+        )
+      )
+    )
+
+  (test-case "increment SP"
+    (let ([cpu (make-cpu #:sp #xffff)]
+          [memory (make-memory)])
+      (let-values ([(cpu clock) (execute cpu 0 '(inc sp))])
+        (begin
+          (check-cpu? cpu (-cpu (-registers 0 0 0 0 0 0 0 #x0001 1 #f) memory))
           (check-equal? clock 8))
         )
       )
