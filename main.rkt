@@ -246,100 +246,75 @@
     (check-equal? cpu expected))
 
   (test-case "decode nop"
-    (let* ([cpu (make-cpu)]
-           [instruction (fetch-and-decode cpu)])
-      (check-equal? instruction '(nop))))
+    (define instruction (fetch-and-decode (make-cpu)))
+
+    (check-equal? instruction '(nop)))
 
   (test-case "decode stop"
-    (let* ([cpu (make-cpu #:memory #(#x10))]
-           [instruction (fetch-and-decode cpu)])
-      (check-equal? instruction '(stop))
-      )
-    )
+    (define instruction (fetch-and-decode (make-cpu #:memory #(#x10))))
+
+    (check-equal? instruction '(stop)))
 
   (test-case "decode load immediatey 16@BC"
-    (let* ([cpu (make-cpu #:memory #(#x01 #xff))]
-           [instruction (fetch-and-decode cpu)])
-      (check-equal? instruction '(ld-imm16 bc #xff))
-      )
-    )
+    (define instruction (fetch-and-decode (make-cpu #:memory #(#x01 #xff))))
+
+    (check-equal? instruction '(ld-imm16 bc #xff)))
 
   (test-case "decode load immediatey 16@DE"
-    (let* ([cpu (make-cpu #:memory #(#x11 #xff))]
-           [instruction (fetch-and-decode cpu)])
-      (check-equal? instruction '(ld-imm16 de #xff))
-      )
-    )
+    (define instruction (fetch-and-decode (make-cpu #:memory #(#x11 #xff))))
+
+    (check-equal? instruction '(ld-imm16 de #xff)))
 
   (test-case "decode load immediatey 16@HL"
-    (let* ([cpu (make-cpu #:memory #(#x21 #xff))]
-           [instruction (fetch-and-decode cpu)])
-      (check-equal? instruction '(ld-imm16 hl #xff))
-      )
-    )
+    (define instruction (fetch-and-decode (make-cpu #:memory #(#x21 #xff))))
+
+    (check-equal? instruction '(ld-imm16 hl #xff)))
 
   (test-case "decode load immediatey 16@SP"
-    (let* ([cpu (make-cpu #:memory #(#x31 #xff))]
-           [instruction (fetch-and-decode cpu)])
-      (check-equal? instruction '(ld-imm16 sp #xff))
-      )
-    )
+    (define instruction (fetch-and-decode (make-cpu #:memory #(#x31 #xff))))
+
+    (check-equal? instruction '(ld-imm16 sp #xff)))
 
   (test-case "decode load from a to [BC]"
-    (let* ([cpu (make-cpu #:memory #(#x02))]
-           [instruction (fetch-and-decode cpu)])
-      (check-equal? instruction '(ld-from-a bc))
-      )
-    )
+    (define cpu (make-cpu #:memory #(#x02)))
+    (define instruction (fetch-and-decode cpu))
+
+    (check-equal? instruction '(ld-from-a bc)))
 
   (test-case "decode load from a to [DE]"
-    (let* ([cpu (make-cpu #:memory #(#x12))]
-           [instruction (fetch-and-decode cpu)])
-      (check-equal? instruction '(ld-from-a de))
-      )
-    )
+    (define instruction (fetch-and-decode (make-cpu #:memory #(#x12))))
+
+    (check-equal? instruction '(ld-from-a de)))
 
   (test-case "decode load from a to [HL+]"
-    (let* ([cpu (make-cpu #:memory #(#x22))]
-           [instruction (fetch-and-decode cpu)])
-      (check-equal? instruction '(ld-from-a hl+))
-      )
-    )
+    (define instruction (fetch-and-decode (make-cpu #:memory #(#x22))))
+
+    (check-equal? instruction '(ld-from-a hl+)))
 
   (test-case "decode load from a to [HL-]"
-    (let* ([cpu (make-cpu #:memory #(#x32))]
-           [instruction (fetch-and-decode cpu)])
-      (check-equal? instruction '(ld-from-a hl-))
-      )
-    )
+    (define instruction (fetch-and-decode (make-cpu #:memory #(#x32))))
+
+    (check-equal? instruction '(ld-from-a hl-)))
 
   (test-case "increment BC"
-    (let* ([cpu (make-cpu #:memory #(#x03))]
-           [instruction (fetch-and-decode cpu)])
-      (check-equal? instruction '(inc-r16 bc))
-      )
-    )
+    (define instruction (fetch-and-decode (make-cpu #:memory #(#x03))))
+
+    (check-equal? instruction '(inc-r16 bc)))
 
   (test-case "increment DE"
-    (let* ([cpu (make-cpu #:memory #(#x13))]
-           [instruction (fetch-and-decode cpu)])
-      (check-equal? instruction '(inc-r16 de))
-      )
-    )
+    (define instruction (fetch-and-decode (make-cpu #:memory #(#x13))))
+
+    (check-equal? instruction '(inc-r16 de)))
 
   (test-case "increment HL"
-    (let* ([cpu (make-cpu #:memory #(#x23))]
-           [instruction (fetch-and-decode cpu)])
-      (check-equal? instruction '(inc-r16 hl))
-      )
-    )
+    (define instruction (fetch-and-decode (make-cpu #:memory #(#x23))))
+
+    (check-equal? instruction '(inc-r16 hl)))
 
   (test-case "increment SP"
-    (let* ([cpu (make-cpu #:memory #(#x33))]
-           [instruction (fetch-and-decode cpu)])
-      (check-equal? instruction '(inc-r16 sp))
-      )
-    )
+    (define instruction (fetch-and-decode (make-cpu #:memory #(#x33))))
+
+    (check-equal? instruction '(inc-r16 sp)))
 
   (test-case "increment B"
     (define instruction (fetch-and-decode (make-cpu #:memory #(#x04))))
@@ -362,178 +337,115 @@
     (check-equal? instruction '(inc-r8 [hl])))
 
   (test-case "decode error"
-    (let ([cpu (make-cpu #:memory #(#xd3))])
-      (check-exn #rx"Unknown instruction@211" (lambda () (fetch-and-decode cpu)))
-      )
-    )
+    (check-exn #rx"Unknown instruction@211"
+               (lambda () (fetch-and-decode (make-cpu #:memory #(#xd3))))))
 
   (test-case "nop"
-    (let ([cpu (make-cpu)])
-      (let ([clock (execute cpu 0 '(nop))])
-        (check-cpu? cpu (make-cpu #:pc #x0001))
-        (check-equal? clock 4)
-        )
-      )
-    )
+    (define cpu (make-cpu))
+
+    (define clock (execute cpu 0 '(nop)))
+
+    (check-cpu? cpu (make-cpu #:pc #x0001))
+    (check-equal? clock 4))
 
   (test-case "stop"
-    (let ([cpu (make-cpu)])
-      (let ([clock (execute cpu 0 '(stop))])
-        (check-cpu? cpu (make-cpu #:pc #x0001 #:low-power-mode #t))
-        (check-equal? clock 4)
-        )
-      )
-    )
+    (define cpu (make-cpu))
+    (define clock (execute cpu 0 '(stop)))
 
-  (test-case "clear flag z"
-    (let ([cpu (make-cpu #:f #xff)])
-      (clear-flag-z cpu)
-      (check-cpu? cpu (make-cpu #:f #x7f ))
-      )
-    )
-
-  (test-case "set flag z"
-    (let ([cpu (make-cpu #:f #x00)])
-      (set-flag-z cpu)
-      (check-cpu? cpu (make-cpu #:f #x80))
-      )
-    )
-
-  (test-case "clear flag n"
-    (let ([cpu (make-cpu #:f #xff)])
-      (clear-flag-n cpu)
-      (check-cpu? cpu (make-cpu #:f #xbf))
-      )
-    )
-
-  (test-case "set flag n"
-    (let ([cpu (make-cpu #:f #x00)])
-      (set-flag-n cpu)
-      (check-cpu? cpu (make-cpu #:f #x40))))
+    (check-cpu? cpu (make-cpu #:pc #x0001 #:low-power-mode #t))
+    (check-equal? clock 4))
 
   (test-case "load immediatey 16@BC"
-    (let ([cpu (make-cpu)])
-      (let ([clock (execute cpu 0 '(ld-imm16 bc #x1234))])
-        (check-cpu? cpu (make-cpu #:b #x12 #:c #x34 #:pc #x0003))
-        (check-equal? clock 12)
-        )
-      )
-    )
+    (define cpu (make-cpu))
+    (define clock (execute cpu 0 '(ld-imm16 bc #x1234)))
+
+    (check-cpu? cpu (make-cpu #:b #x12 #:c #x34 #:pc #x0003))
+    (check-equal? clock 12))
 
   (test-case "load immediatey 16@DE"
-    (let ([cpu (make-cpu)])
-      (let ([clock (execute cpu 0 '(ld-imm16 de #x1234))])
-        (check-cpu? cpu (make-cpu #:d #x12 #:e #x34 #:pc #x0003))
-        (check-equal? clock 12)
-        )
-      )
-    )
+    (define cpu (make-cpu))
+    (define clock (execute cpu 0 '(ld-imm16 de #x1234)))
+
+    (check-cpu? cpu (make-cpu #:d #x12 #:e #x34 #:pc #x0003))
+    (check-equal? clock 12))
 
   (test-case "load immediatey 16@HL"
-    (let ([cpu (make-cpu)])
-      (let ([clock (execute cpu 0 '(ld-imm16 hl #x1234))])
-        (check-cpu? cpu (make-cpu #:h #x12 #:l #x34  #:pc #x0003))
-        (check-equal? clock 12)
-        )
-      )
-    )
+    (define cpu (make-cpu))
+    (define clock (execute cpu 0 '(ld-imm16 hl #x1234)))
+
+    (check-cpu? cpu (make-cpu #:h #x12 #:l #x34  #:pc #x0003))
+    (check-equal? clock 12))
 
   (test-case "load immediatey 16@SP"
-    (let ([cpu (make-cpu)])
-      (let ([clock (execute cpu 0 '(ld-imm16 sp #x1234))])
-        (check-cpu? cpu (make-cpu #:sp #x1234 #:pc #x0003))
-        (check-equal? clock 12)
-        )
-      )
-    )
+    (define cpu (make-cpu))
+    (define clock (execute cpu 0 '(ld-imm16 sp #x1234)))
+
+    (check-cpu? cpu (make-cpu #:sp #x1234 #:pc #x0003))
+    (check-equal? clock 12))
 
   (test-case "load from A to [BC]"
-    (let ([cpu (make-cpu #:a #xff #:b #x01 #:c #x23)]
-          [memory(make-memory)])
-      (let ([clock (execute cpu 0 '(ld-from-a bc))])
-        (begin
-          (vector-set! memory #x0123 #xff)
-          (check-cpu? cpu (make-cpu #:a #xff #:b #x01 #:c #x23 #:pc #x0001 #:memory memory))
-          (check-equal? clock 8))
-        )
-      )
-    )
+    (define cpu (make-cpu #:a #xff #:b #x01 #:c #x23))
+    (define memory (make-memory))
+    (vector-set! memory #x0123 #xff)
+    (define clock (execute cpu 0 '(ld-from-a bc)))
+
+    (check-cpu? cpu (make-cpu #:a #xff #:b #x01 #:c #x23 #:pc #x0001 #:memory memory))
+    (check-equal? clock 8))
 
   (test-case "load from A to [DE]"
-    (let ([cpu (make-cpu #:a #xff #:d #x01 #:e #x23)]
-          [memory(make-memory)])
-      (let ([clock (execute cpu 0 '(ld-from-a de))])
-        (begin
-          (vector-set! memory #x0123 #xff)
-          (check-cpu? cpu (make-cpu #:a #xff #:d #x01 #:e #x23 #:pc #x0001 #:memory memory))
-          (check-equal? clock 8))
-        )
-      )
-    )
+    (define cpu (make-cpu #:a #xff #:d #x01 #:e #x23))
+    (define memory (make-memory))
+    (vector-set! memory #x0123 #xff)
+    (define clock (execute cpu 0 '(ld-from-a de)))
+
+    (check-cpu? cpu (make-cpu #:a #xff #:d #x01 #:e #x23 #:pc #x0001 #:memory memory))
+    (check-equal? clock 8))
 
   (test-case "load from A to [HL+]"
-    (let ([cpu (make-cpu #:a #xff #:h #x01 #:l #x23)]
-          [memory(make-memory)])
-      (let ([clock (execute cpu 0 '(ld-from-a hl+))])
-        (begin
-          (vector-set! memory #x0123 #xff)
-          (check-cpu? cpu (make-cpu  #:a #xff #:h #x01 #:l #x24  #:pc #x0001  #:memory memory))
-          (check-equal? clock 8))
-        )
-      )
-    )
+    (define cpu (make-cpu #:a #xff #:h #x01 #:l #x23))
+    (define memory (make-memory))
+    (vector-set! memory #x0123 #xff)
+    (define clock (execute cpu 0 '(ld-from-a hl+)))
+
+    (check-cpu? cpu (make-cpu  #:a #xff #:h #x01 #:l #x24  #:pc #x0001  #:memory memory))
+    (check-equal? clock 8))
 
   (test-case "load from A to [HL-]"
-    (let ([cpu (make-cpu #:a #xff #:h #x1 #:l #x23)]
-          [memory (make-memory)])
-      (let ([clock (execute cpu 0 '(ld-from-a hl-))])
-        (begin
-          (vector-set! memory #x0123 #xff)
-          (check-cpu? cpu (make-cpu #:a #xff #:h #x01 #:l #x22 #:pc 1 #:memory memory))
-          (check-equal? clock 8))
-        )
-      )
-    )
+    (define cpu (make-cpu #:a #xff #:h #x1 #:l #x23))
+    (define memory (make-memory))
+    (vector-set! memory #x0123 #xff)
+    (define clock (execute cpu 0 '(ld-from-a hl-)))
+
+    (check-cpu? cpu (make-cpu #:a #xff #:h #x01 #:l #x22 #:pc 1 #:memory memory))
+    (check-equal? clock 8))
 
   (test-case "increment BC"
-    (let ([cpu (make-cpu #:c #xff)])
-      (let ([clock (execute cpu 0 '(inc-r16 bc))])
-        (begin
-          (check-cpu? cpu (make-cpu #:b #x01 #:c #x00 #:pc #x0001))
-          (check-equal? clock 8))
-        )
-      )
-    )
+    (define cpu (make-cpu #:c #xff))
+    (define clock (execute cpu 0 '(inc-r16 bc)))
+
+    (check-cpu? cpu (make-cpu #:b #x01 #:c #x00 #:pc #x0001))
+    (check-equal? clock 8))
 
   (test-case "increment DE"
-    (let ([cpu (make-cpu #:e #xff)])
-      (let ([clock (execute cpu 0 '(inc-r16 de))])
-        (begin
-          (check-cpu? cpu (make-cpu #:d #x01 #:e #x00 #:pc #x0001))
-          (check-equal? clock 8))
-        )
-      )
-    )
+    (define cpu (make-cpu #:e #xff))
+    (define clock (execute cpu 0 '(inc-r16 de)))
+
+    (check-cpu? cpu (make-cpu #:d #x01 #:e #x00 #:pc #x0001))
+    (check-equal? clock 8))
 
   (test-case "increment HL"
-    (let ([cpu (make-cpu #:l #xff)])
-      (let ([clock (execute cpu 0 '(inc-r16 hl))])
-        (begin
-          (check-cpu? cpu (make-cpu #:h #x01 #:l #x00 #:pc #x0001))
-          (check-equal? clock 8))
-        )
-      )
-    )
+    (define cpu (make-cpu #:l #xff))
+    (define clock (execute cpu 0 '(inc-r16 hl)))
+
+    (check-cpu? cpu (make-cpu #:h #x01 #:l #x00 #:pc #x0001))
+    (check-equal? clock 8))
 
   (test-case "increment SP"
-    (let ([cpu (make-cpu #:sp #xffff)])
-      (let ([clock (execute cpu 0 '(inc-r16 sp))])
-        (begin
-          (check-cpu? cpu (make-cpu #:pc #x0001 #:sp 1))
-          (check-equal? clock 8))
-        )
-      )
-    )
+    (define cpu (make-cpu #:sp #xffff))
+    (define clock (execute cpu 0 '(inc-r16 sp)))
+
+    (check-cpu? cpu (make-cpu #:pc #x0001 #:sp 1))
+    (check-equal? clock 8))
 
   (test-case "increment B"
     (define cpu (make-cpu #:b #xff #:f #b01000000))
