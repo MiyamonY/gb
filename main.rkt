@@ -80,12 +80,16 @@
 
 (define-flag c 4)
 
-(define (update-flag-when-incrementing cpu val)
+(define (update-flag-when-incrementing cpu val incr)
   (clear-flag-n cpu)
 
-  (when (= val #x100) (set-flag-z cpu))
+  (if (= val #x100)
+      (set-flag-z cpu)
+      (clear-flag-z cpu))
 
-  (when (>= val #x100) (set-flag-h cpu)))
+  (if (and (bitwise-and #x10 val) (>= #x10 (- val incr)))
+      (set-flag-h cpu)
+      (clear-flag-h cpu)))
 
 (define-syntax (define-increment/decrement-8bit-register stx)
   (syntax-case stx ()
@@ -99,7 +103,7 @@
            (define (id-increnment cpu [incr 1])
              (define val (+ (id-access-register cpu) incr))
 
-             (update-flag-when-incrementing cpu val)
+             (update-flag-when-incrementing cpu val incr)
 
              (id-load-register cpu (remainder val #x100)))
 
@@ -125,7 +129,7 @@
 
   (define val (+ (vector-ref memory addr) incr))
 
-  (update-flag-when-incrementing cpu val)
+  (update-flag-when-incrementing cpu val incr)
 
   (vector-set! memory addr (remainder val #x100)))
 
@@ -451,27 +455,34 @@
     (define cpu (make-cpu #:b #xff #:f #b01000000))
     (define clock (execute cpu 0 '(inc-r8 b)))
 
-    (check-cpu? cpu (make-cpu #:b #x00 #:f #b10100000 #:pc #x0001))
+    (check-cpu? cpu (make-cpu #:b #x00 #:f #b10000000 #:pc #x0001))
+    (check-equal? clock 4))
+
+  (test-case "increment B with half carry"
+    (define cpu (make-cpu #:b #x0f #:f #b01000000))
+    (define clock (execute cpu 0 '(inc-r8 b)))
+
+    (check-cpu? cpu (make-cpu #:b #x10 #:f #b00100000 #:pc #x0001))
     (check-equal? clock 4))
 
   (test-case "increment D"
     (define cpu (make-cpu #:d #xff #:f #b01000000))
     (define clock (execute cpu 0 '(inc-r8 d)))
 
-    (check-cpu? cpu (make-cpu #:d #x00 #:f #b10100000 #:pc #x0001))
+    (check-cpu? cpu (make-cpu #:d #x00 #:f #b10000000 #:pc #x0001))
     (check-equal? clock 4))
 
   (test-case "increment D"
     (define cpu (make-cpu #:h #xff #:f #b01000000))
     (define clock (execute cpu 0 '(inc-r8 h)))
 
-    (check-cpu? cpu (make-cpu #:h  #x00 #:f #b10100000 #:pc #x0001))
+    (check-cpu? cpu (make-cpu #:h  #x00 #:f #b10000000 #:pc #x0001))
     (check-equal? clock 4))
 
   (test-case "increment [HL]"
     (define cpu (make-cpu #:h #x00 #:l #x01 #:f #b01000000 #:memory (vector-copy #(#xff #xff)))) ;to mutable
     (define clock (execute cpu 0 '(inc-r8 [hl])))
 
-    (check-cpu? cpu (make-cpu #:h #x00 #:l #x01 #:f #b10100000 #:memory #(#xff #x00) #:pc #x0001))
+    (check-cpu? cpu (make-cpu #:h #x00 #:l #x01 #:f #b10000000 #:memory #(#xff #x00) #:pc #x0001))
     (check-equal? clock 12))
   )
