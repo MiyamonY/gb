@@ -87,9 +87,20 @@
       (set-flag-z cpu)
       (clear-flag-z cpu))
 
-  (if (and (bitwise-and #x10 val) (>= #x10 (- val incr)))
+  (if (and (bitwise-bit-set? val 4) (>= #x10 (- val incr)))
       (set-flag-h cpu)
       (clear-flag-h cpu)))
+
+(define (update-flag-when-decrementing cpu val decr)
+  (set-flag-n cpu)
+
+  (if (= val #x00)
+      (set-flag-z cpu)
+      (clear-flag-z cpu))
+
+  (if (and (not (bitwise-bit-set? val 4)) (bitwise-bit-set? (+ val decr) 4))
+      (clear-flag-h cpu)
+      (set-flag-h cpu)))
 
 (define-syntax (define-increment/decrement-8bit-register stx)
   (syntax-case stx ()
@@ -107,10 +118,10 @@
 
              (id-load-register cpu (remainder val #x100)))
 
-           (define (id-decrement cpu [val 1])
-             (define r8-n (remainder (+ (- (id-access-register cpu) val) #xffff) #xffff))
+           (define (id-decrement cpu [decr 1])
+             (define r8-n (remainder (+ (- (id-access-register cpu) decr) #xffff) #xffff))
 
-             (define cpu (if (= r8-n 0) (set-flag-z cpu) (clear-flag-z cpu)))
+             (update-flag-when-incrementing cpu val decr)
 
              (id-load-register cpu r8-n))))]))
 
@@ -130,6 +141,17 @@
   (define val (+ (vector-ref memory addr) incr))
 
   (update-flag-when-incrementing cpu val incr)
+
+  (vector-set! memory addr (remainder val #x100)))
+
+(define (decrement-indirect-hl cpu [decr 1])
+  (define addr (-cpu-hl cpu))
+
+  (define memory (-cpu-memory cpu))
+
+  (define val (- (vector-ref memory addr) decr))
+
+  (update-flag-when-decrementing cpu val decr)
 
   (vector-set! memory addr (remainder val #x100)))
 
@@ -186,6 +208,10 @@
     [(#x14) '(inc-r8 d)]
     [(#x24) '(inc-r8 h)]
     [(#x34) '(inc-r8 [hl])]
+    [(#x05) '(dec-r8 b)]
+    [(#x15) '(dec-r8 d)]
+    [(#x25) '(dec-r8 h)]
+    [(#x35) '(dec-r8 [hl])]
     [else (error 'fetch-and-decode "Unknown instruction@~a" instruction)])
   )
 
@@ -233,6 +259,15 @@
          [(quote d) (increment-d cpu) 4]
          [(quote h) (increment-h cpu) 4]
          [(quote [hl]) (increment-indirect-hl cpu) 12]))
+     (increment-pc cpu 1)
+     (+ clock+ clock)]
+    [(list 'dec-r8 r8)
+     (define clock+
+       (match r8
+         [(quote b) (decrement-b cpu) 4]
+         [(quote d) (decrement-d cpu) 4]
+         [(quote h) (decrement-h cpu) 4]
+         [(quote [hl]) (decrement-indirect-hl cpu) 12]))
      (increment-pc cpu 1)
      (+ clock+ clock)]))
 
@@ -339,6 +374,26 @@
     (define instruction (fetch-and-decode (make-cpu #:memory #(#x34))))
 
     (check-equal? instruction '(inc-r8 [hl])))
+
+  (test-case "decrement B"
+    (define instruction (fetch-and-decode (make-cpu #:memory #(#x05))))
+
+    (check-equal? instruction '(dec-r8 b)))
+
+  (test-case "decrement D"
+    (define instruction (fetch-and-decode (make-cpu #:memory #(#x15))))
+
+    (check-equal? instruction '(dec-r8 d)))
+
+  (test-case "decrement H"
+    (define instruction (fetch-and-decode (make-cpu #:memory #(#x25))))
+
+    (check-equal? instruction '(dec-r8 h)))
+
+  (test-case "decrement [HL]"
+    (define instruction (fetch-and-decode (make-cpu #:memory #(#x35))))
+
+    (check-equal? instruction '(dec-r8 [hl])))
 
   (test-case "decode error"
     (check-exn #rx"Unknown instruction@211"
@@ -456,6 +511,41 @@
     (define clock (execute cpu 0 '(inc-r8 b)))
 
     (check-cpu? cpu (make-cpu #:b #x00 #:f #b10000000 #:pc #x0001))
+    (check-equal? clock 4))
+
+  (test-case "increment B with half carry"
+    (define cpu (make-cpu #:b #x0f #:f #b01000000))
+    (define clock (execute cpu 0 '(inc-r8 b)))
+
+    (check-cpu? cpu (make-cpu #:b #x10 #:f #b00100000 #:pc #x0001))
+    (check-equal? clock 4))
+
+  (test-case "increment D"
+    (define cpu (make-cpu #:d #xff #:f #b01000000))
+    (define clock (execute cpu 0 '(inc-r8 d)))
+
+    (check-cpu? cpu (make-cpu #:d #x00 #:f #b10000000 #:pc #x0001))
+    (check-equal? clock 4))
+
+  (test-case "increment D"
+    (define cpu (make-cpu #:h #xff #:f #b01000000))
+    (define clock (execute cpu 0 '(inc-r8 h)))
+
+    (check-cpu? cpu (make-cpu #:h  #x00 #:f #b10000000 #:pc #x0001))
+    (check-equal? clock 4))
+
+  (test-case "increment [HL]"
+    (define cpu (make-cpu #:h #x00 #:l #x01 #:f #b01000000 #:memory (vector-copy #(#xff #xff)))) ;to mutable
+    (define clock (execute cpu 0 '(inc-r8 [hl])))
+
+    (check-cpu? cpu (make-cpu #:h #x00 #:l #x01 #:f #b10000000 #:memory #(#xff #x00) #:pc #x0001))
+    (check-equal? clock 12))
+
+  (test-case "decrement B"
+    (define cpu (make-cpu #:b #x00 #:f #b01000000))
+    (define clock (execute cpu 0 '(dec-r8 b)))
+
+    (check-cpu? cpu (make-cpu #:b #xff #:f #b00000000 #:pc #x0001))
     (check-equal? clock 4))
 
   (test-case "increment B with half carry"
