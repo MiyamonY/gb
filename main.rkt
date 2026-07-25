@@ -4,25 +4,46 @@
   #:mutable
   #:transparent)
 
-(define (fetch code reg)
+(struct cpu (register memory)
+  #:mutable
+  #:transparent)
+
+(define (neg-byte? byte)
+  (not (zero? (bitwise-and byte #x80))))
+
+(define (fetch code cpu)
+  (define reg (cpu-register cpu))
   (define pc (register-pc reg))
   (define op-code (bytes-ref code pc))
 
   (match op-code
     [#xa9
      (set-register-pc! reg (+ pc 2))
-     (values `(lda-imm ,(bytes-ref code (+ 1 pc))) reg)]))
 
-(define (neg-byte? byte)
-  (not (zero? (bitwise-and byte #x80))))
+     (values `(lda-imm ,(bytes-ref code (+ 1 pc))) cpu)]
+    [#xa5
+     (set-register-pc! reg (+ pc 3))
 
-(define (decode op reg)
+     (values `(lda-zero-page ,(bytes-ref code (+ 1 pc))) cpu)]))
+
+(define (decode op cpu)
+  (define memory (cpu-memory cpu))
+  (define reg (cpu-register cpu))
+
   (match op
     [(list 'lda-imm imm)
      (set-register-a! reg imm)
      (set-register-z! reg (if (= imm 0) 1 0))
      (set-register-n! reg (if (neg-byte? imm) 1 0))
-     reg
+     cpu
+     ]
+    [(list 'lda-zero-page addr)
+     (define val (bytes-ref memory addr))
+
+     (set-register-a! reg val)
+     (set-register-z! reg (if (= val 0) 1 0))
+     (set-register-n! reg (if (neg-byte? val) 1 0))
+     cpu
      ]
     )
   )
@@ -33,19 +54,35 @@
 
   (define (run1 code)
       (call-with-values
-       (lambda () (fetch code (register 0 0 0 0 0 0 0)))
+       (lambda () (fetch code (cpu (register 0 0 0 0 0 0 0) #"\x01\x02")))
        decode))
 
   (define (lda-imm-test)
     (test-suite
      "LDA imm"
+
      (test-case "0xff"
-       (define reg (run1 #"\xa9\xff"))
-       (check-equal? reg (register #xff 0 0 2 0 0 1)))
+       (define cpu (run1 #"\xa9\xff"))
+
+       (check-equal? (cpu-register cpu) (register #xff 0 0 2 0 0 1)))
 
      (test-case "0x00"
-       (define reg (run1 #"\xa9\x00"))
-       (check-equal? reg (register 0 0 0 2 0 1 0)))))
+       (define cpu (run1 #"\xa9\x00"))
 
-  (run-tests (lda-imm-test))
+       (check-equal? (cpu-register cpu) (register #x00 0 0 2 0 1 0)))))
+
+  (define (lda-zero-page)
+    (test-suite
+     "LDA zero page"
+
+     (test-case "0xff"
+       (define cpu (run1 #"\xa5\x01"))
+
+       (check-equal? (cpu-register cpu) (register #x02 0 0 3 0 0 0)))))
+
+  (run-tests
+   (test-suite
+    "run all"
+    (lda-imm-test)
+    (lda-zero-page)))
 )
