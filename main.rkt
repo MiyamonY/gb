@@ -24,7 +24,11 @@
     [#xa5
      (set-register-pc! reg (+ pc 2))
 
-     (values `(lda-zero-page ,(bytes-ref code (+ 1 pc))) cpu)]))
+     (values `(lda-zero-page ,(bytes-ref code (+ 1 pc))) cpu)]
+    [#xb5
+     (set-register-pc! reg (+ pc 2))
+     (values `(lda+x-zero-page ,(bytes-ref code (+ 1 pc))) cpu)]
+    ))
 
 (define (decode op cpu)
   (define memory (cpu-memory cpu))
@@ -48,6 +52,15 @@
      (set-register-cycle! reg 3)
      cpu
      ]
+    [(list 'lda+x-zero-page addr)
+     (define x (register-x reg))
+
+     (define val (bytes-ref memory (modulo (+ x addr) #xff)))
+
+     (lda reg val)
+     (set-register-cycle! reg 4)
+     cpu
+     ]
     )
   )
 
@@ -55,9 +68,9 @@
   (require rackunit
            rackunit/text-ui)
 
-  (define (run1 code)
+  (define (run1 code reg)
       (call-with-values
-       (lambda () (fetch code (cpu (register  0 0 0 0 0 0 0 0) #"\x01\x02")))
+       (lambda () (fetch code (cpu reg #"\x01\x02\x03\x04")))
        decode))
 
   (define (lda-imm-test)
@@ -65,12 +78,12 @@
      "LDA imm"
 
      (test-case "0xff"
-       (define cpu (run1 #"\xa9\xff"))
+       (define cpu (run1 #"\xa9\xff" (register 0 0 0 0 0 0 0 0)))
 
        (check-equal? (cpu-register cpu) (register #xff 0 0 2 0 0 1 2)))
 
      (test-case "0x00"
-       (define cpu (run1 #"\xa9\x00"))
+       (define cpu (run1 #"\xa9\x00" (register 0 0 0 0 0 0 0 0)))
 
        (check-equal? (cpu-register cpu) (register #x00 0 0 2 0 1 0 2)))))
 
@@ -79,13 +92,23 @@
      "LDA zero page"
 
      (test-case "0xff"
-       (define cpu (run1 #"\xa5\x01"))
+       (define cpu (run1 #"\xa5\x01" (register 0 0 0 0 0 0 0 0)))
 
        (check-equal? (cpu-register cpu) (register #x02 0 0 2 0 0 0 3)))))
+
+  (define (lda+x-zero-page)
+    (test-suite
+     "LDA +x zero page"
+
+     (test-case "0xff"
+       (define cpu (run1 #"\xb5\x01" (register 0 1 0 0 0 0 0 0)))
+
+       (check-equal? (cpu-register cpu) (register #x03 1 0 2 0 0 0 4)))))
 
   (run-tests
    (test-suite
     "run all"
     (lda-imm-test)
-    (lda-zero-page)))
+    (lda-zero-page)
+    (lda+x-zero-page)))
 )
