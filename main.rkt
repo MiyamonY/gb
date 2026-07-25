@@ -1,6 +1,6 @@
 #lang racket
 
-(struct register (a x y pc sp z n)
+(struct register (a x y pc sp z n cycle)
   #:mutable
   #:transparent)
 
@@ -22,7 +22,7 @@
 
      (values `(lda-imm ,(bytes-ref code (+ 1 pc))) cpu)]
     [#xa5
-     (set-register-pc! reg (+ pc 3))
+     (set-register-pc! reg (+ pc 2))
 
      (values `(lda-zero-page ,(bytes-ref code (+ 1 pc))) cpu)]))
 
@@ -38,12 +38,14 @@
   (match op
     [(list 'lda-imm imm)
      (lda reg imm)
+     (set-register-cycle! reg 2)
      cpu
      ]
     [(list 'lda-zero-page addr)
      (define val (bytes-ref memory addr))
 
      (lda reg val)
+     (set-register-cycle! reg 3)
      cpu
      ]
     )
@@ -55,7 +57,7 @@
 
   (define (run1 code)
       (call-with-values
-       (lambda () (fetch code (cpu (register 0 0 0 0 0 0 0) #"\x01\x02")))
+       (lambda () (fetch code (cpu (register  0 0 0 0 0 0 0 0) #"\x01\x02")))
        decode))
 
   (define (lda-imm-test)
@@ -65,12 +67,12 @@
      (test-case "0xff"
        (define cpu (run1 #"\xa9\xff"))
 
-       (check-equal? (cpu-register cpu) (register #xff 0 0 2 0 0 1)))
+       (check-equal? (cpu-register cpu) (register #xff 0 0 2 0 0 1 2)))
 
      (test-case "0x00"
        (define cpu (run1 #"\xa9\x00"))
 
-       (check-equal? (cpu-register cpu) (register #x00 0 0 2 0 1 0)))))
+       (check-equal? (cpu-register cpu) (register #x00 0 0 2 0 1 0 2)))))
 
   (define (lda-zero-page)
     (test-suite
@@ -79,7 +81,7 @@
      (test-case "0xff"
        (define cpu (run1 #"\xa5\x01"))
 
-       (check-equal? (cpu-register cpu) (register #x02 0 0 3 0 0 0)))))
+       (check-equal? (cpu-register cpu) (register #x02 0 0 2 0 0 0 3)))))
 
   (run-tests
    (test-suite
