@@ -25,6 +25,9 @@
      (set-register-pc! reg (+ pc 2))
 
      (values `(lda-zero-page ,(bytes-ref code (+ 1 pc))) cpu)]
+    [#xad
+     (set-register-pc! reg (+ pc 3))
+     (values `(lda-abs ,(+ (arithmetic-shift (bytes-ref code (+ 1 pc)) 8) (bytes-ref code (+ 2 pc)))) cpu)]
     [#xb5
      (set-register-pc! reg (+ pc 2))
      (values `(lda+x-zero-page ,(bytes-ref code (+ 1 pc))) cpu)]
@@ -61,6 +64,13 @@
      (set-register-cycle! reg 4)
      cpu
      ]
+    [(list 'lda-abs addr)
+     (define val (bytes-ref memory addr))
+
+     (lda reg val)
+     (set-register-cycle! reg 4)
+     cpu
+     ]
     )
   )
 
@@ -91,7 +101,7 @@
     (test-suite
      "LDA zero page"
 
-     (test-case "0xff"
+     (test-case "0x01"
        (define cpu (run1 #"\xa5\x01" (register 0 0 0 0 0 0 0 0)))
 
        (check-equal? (cpu-register cpu) (register #x02 0 0 2 0 0 0 3)))))
@@ -100,10 +110,19 @@
     (test-suite
      "LDA +x zero page"
 
-     (test-case "0xff"
+     (test-case "0x01"
        (define cpu (run1 #"\xb5\x01" (register 0 1 0 0 0 0 0 0)))
 
        (check-equal? (cpu-register cpu) (register #x03 1 0 2 0 0 0 4)))))
+
+  (define (lda-abs)
+    (test-suite
+     "LDA abs"
+
+     (test-case "0x0001"
+       (define cpu (run1 #"\xad\x00\x01" (register 0 0 0 0 0 0 0 0)))
+
+       (check-equal? (cpu-register cpu) (register #x02 0 0 3 0 0 0 4)))))
 
   (run-tests
    (test-suite
