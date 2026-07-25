@@ -30,19 +30,20 @@
   (define memory (cpu-memory cpu))
   (define reg (cpu-register cpu))
 
+  (define (lda reg val)
+    (set-register-a! reg val)
+    (set-register-z! reg (if (= val 0) 1 0))
+    (set-register-n! reg (if (neg-byte? val) 1 0)))
+
   (match op
     [(list 'lda-imm imm)
-     (set-register-a! reg imm)
-     (set-register-z! reg (if (= imm 0) 1 0))
-     (set-register-n! reg (if (neg-byte? imm) 1 0))
+     (lda reg imm)
      cpu
      ]
     [(list 'lda-zero-page addr)
      (define val (bytes-ref memory addr))
 
-     (set-register-a! reg val)
-     (set-register-z! reg (if (= val 0) 1 0))
-     (set-register-n! reg (if (neg-byte? val) 1 0))
+     (lda reg val)
      cpu
      ]
     )
