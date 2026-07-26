@@ -28,10 +28,6 @@
   (define op-code (bytes-ref code pc))
 
   (match op-code
-    [#xa9
-     (set-register-pc! reg (+ pc 2))
-
-     (values `(lda-imm ,(bytes-ref code (+ 1 pc))) cpu)]
     [#xa1
      (set-register-pc! reg (+ pc 2))
 
@@ -40,6 +36,10 @@
      (set-register-pc! reg (+ pc 2))
 
      (values `(lda-zero-page ,(bytes-ref code (+ 1 pc))) cpu)]
+    [#xa9
+     (set-register-pc! reg (+ pc 2))
+
+     (values `(lda-imm ,(bytes-ref code (+ 1 pc))) cpu)]
     [#xad
      (set-register-pc! reg (+ pc 3))
 
@@ -48,7 +48,7 @@
      (values (list 'lda-abs addr) cpu)]
     [#xb5
      (set-register-pc! reg (+ pc 2))
-     (values `(lda+x-zero-page ,(bytes-ref code (+ 1 pc))) cpu)]
+     (values `(lda-zero-page-x ,(bytes-ref code (+ 1 pc))) cpu)]
     [#xb9
      (set-register-pc! reg (+ pc 3))
 
@@ -60,7 +60,7 @@
 
      (define addr (read-abs-addr-from code (+ 1 pc)))
 
-     (values (list 'lda-abs+x addr) cpu)]
+     (values (list 'lda-abs-x addr) cpu)]
     ))
 
 (define (decode op cpu)
@@ -85,7 +85,7 @@
      (set-register-cycle! reg 3)
      cpu
      ]
-    [(list 'lda+x-zero-page addr)
+    [(list 'lda-zero-page-x addr)
      (define x (register-x reg))
 
      (define val (bytes-ref memory (modulo (+ x addr) #xff)))
@@ -101,7 +101,7 @@
      (set-register-cycle! reg 4)
      cpu
      ]
-    [(list 'lda-abs+x base-addr)
+    [(list 'lda-abs-x base-addr)
      (define x (register-x reg))
 
      (define-values (addr crossed) (add-addr base-addr x))
@@ -162,7 +162,7 @@
 
        (check-equal? (cpu-register cpu) (register #x01 0 0 2 0 0 0 3)))))
 
-  (define (lda+x-zero-page)
+  (define (lda-zero-page-x)
     (test-suite
      "LDA +x zero page"
 
@@ -180,7 +180,7 @@
 
        (check-equal? (cpu-register cpu) (register #x01 0 0 3 0 0 0 4)))))
 
-  (define (lda-abs+x)
+  (define (lda-abs-x)
     (test-suite
      "LDA abs"
 
@@ -208,8 +208,8 @@
     "run all"
     (lda-imm-test)
     (lda-zero-page)
-    (lda+x-zero-page)
+    (lda-zero-page-x)
     (lda-abs)
-    (lda-abs+x)
+    (lda-abs-x)
     (lda-indirect-x)))
 )
