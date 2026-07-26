@@ -19,6 +19,9 @@
 
   (values (modulo addr #x10000) (page-crossed? base addr)))
 
+(define (read-abs-addr-from code from)
+  (+ (arithmetic-shift (bytes-ref code from) 8) (bytes-ref code (+ 1 from))))
+
 (define (fetch code cpu)
   (define reg (cpu-register cpu))
   (define pc (register-pc reg))
@@ -35,13 +38,25 @@
      (values `(lda-zero-page ,(bytes-ref code (+ 1 pc))) cpu)]
     [#xad
      (set-register-pc! reg (+ pc 3))
-     (values `(lda-abs ,(+ (arithmetic-shift (bytes-ref code (+ 1 pc)) 8) (bytes-ref code (+ 2 pc)))) cpu)]
+
+     (define addr (read-abs-addr-from code (+ 1 pc)))
+
+     (values (list 'lda-abs addr) cpu)]
     [#xb5
      (set-register-pc! reg (+ pc 2))
      (values `(lda+x-zero-page ,(bytes-ref code (+ 1 pc))) cpu)]
+    [#xb9
+     (set-register-pc! reg (+ pc 3))
+
+     (define addr (read-abs-addr-from code (+ 1 pc)))
+
+     (values (list 'lda-abs+y addr) cpu)]
     [#xbd
      (set-register-pc! reg (+ pc 3))
-     (values `(lda-abs+x ,(+ (arithmetic-shift (bytes-ref code (+ 1 pc)) 8) (bytes-ref code (+ 2 pc)))) cpu)]
+
+     (define addr (read-abs-addr-from code (+ 1 pc)))
+
+     (values (list 'lda-abs+x addr) cpu)]
     ))
 
 (define (decode op cpu)
