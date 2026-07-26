@@ -19,8 +19,8 @@
 
   (values (modulo addr #x10000) (page-crossed? base addr)))
 
-(define (read-abs-addr-from code from)
-  (+ (arithmetic-shift (bytes-ref code from) 8) (bytes-ref code (+ 1 from))))
+(define (read-abs-addr-from code-or-memory from)
+  (+ (arithmetic-shift (bytes-ref code-or-memory from) 8) (bytes-ref code-or-memory (+ 1 from))))
 
 (define (fetch code cpu)
   (define reg (cpu-register cpu))
@@ -32,6 +32,10 @@
      (set-register-pc! reg (+ pc 2))
 
      (values `(lda-imm ,(bytes-ref code (+ 1 pc))) cpu)]
+    [#xa1
+     (set-register-pc! reg (+ pc 2))
+
+     (values `(lda-indirect-x ,(bytes-ref code (+ 1 pc))) cpu)]
     [#xa5
      (set-register-pc! reg (+ pc 2))
 
@@ -108,6 +112,18 @@
      (set-register-cycle! reg (if crossed 5 4))
      cpu
      ]
+    [(list 'lda-indirect-x base-addr)
+     (define x (register-x reg))
+
+     (define-values (addr _) (add-addr base-addr x))
+
+     (define memory-addr (read-abs-addr-from memory addr))
+
+     (lda reg (bytes-ref memory memory-addr))
+     (set-register-cycle! reg 6)
+     cpu
+     ]
+
     )
   )
 
@@ -178,6 +194,15 @@
 
        (check-equal? (cpu-register cpu) (register #x01 2 0 3 0 0 0 5)))))
 
+  (define (lda-indirect-x)
+    (test-suite
+     "LDA abs"
+
+     (test-case "0x01"
+       (define cpu (run1 #"\xa1\x01" (register 0 2 0 0 0 0 0 0)))
+
+       (check-equal? (cpu-register cpu) (register #x04 2 0 2 0 0 0 6)))))
+
   (run-tests
    (test-suite
     "run all"
@@ -185,5 +210,6 @@
     (lda-zero-page)
     (lda+x-zero-page)
     (lda-abs)
-    (lda-abs+x)))
+    (lda-abs+x)
+    (lda-indirect-x)))
 )
