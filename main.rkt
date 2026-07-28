@@ -4,19 +4,25 @@
 
 (struct register (a x y pc sp z n cycle) #:mutable #:transparent)
 
-(define-syntax (define-ld stx)
-  (syntax-parse stx
-    [(_ register:id)
-     #:with ld-name-id (format-id #'register "ld~a" #'register)
-     #:with set-regiser-id (format-id #'register "set-register-~a!" #'register)
-     #'(define (ld-name-id reg val)
-         (set-regiser-id reg val)
-         (set-register-z! reg (if (= val 0) 1 0))
-         (set-register-n! reg (if (neg-byte? val) 1 0)))]))
+(define (step-register-cycle! register diff)
+  (define cycle (register-cycle register))
 
-(define-ld a)
+  (set-register-cycle! register (+ cycle diff)))
 
-(define-ld x)
+(define (step-register-pc! register diff)
+  (define pc (register-pc register))
+
+  (set-register-pc! register (+ pc diff)))
+
+(define (lda reg val)
+  (set-register-a! reg val)
+  (set-register-z! reg (if (= val 0) 1 0))
+  (set-register-n! reg (if (neg-byte? val) 1 0)))
+
+(define (ldx reg val)
+  (set-register-x! reg val)
+  (set-register-z! reg (if (= val 0) 1 0))
+  (set-register-n! reg (if (neg-byte? val) 1 0)))
 
 (struct cpu (register memory) #:mutable #:transparent)
 
@@ -41,43 +47,43 @@
 
   (match op-code
     [#xa1
-     (set-register-pc! reg (+ pc 2))
+     (step-register-pc! reg 2)
 
      (values `(lda-indirect-x ,(bytes-ref code (+ 1 pc))) cpu)]
     [#xa2
-     (set-register-pc! reg (+ pc 2))
+     (step-register-pc! reg 2)
 
      (values `(ldx-imm ,(bytes-ref code (+ 1 pc))) cpu)]
     [#xa5
-     (set-register-pc! reg (+ pc 2))
+     (step-register-pc! reg 2)
 
      (values `(lda-zero-page ,(bytes-ref code (+ 1 pc))) cpu)]
     [#xa9
-     (set-register-pc! reg (+ pc 2))
+     (step-register-pc! reg 2)
 
      (values `(lda-imm ,(bytes-ref code (+ 1 pc))) cpu)]
     [#xad
-     (set-register-pc! reg (+ pc 3))
+     (step-register-pc! reg 3)
 
      (define addr (read-abs-addr-from code (+ 1 pc)))
 
      (values (list 'lda-abs addr) cpu)]
     [#xb1
-     (set-register-pc! reg (+ pc 2))
+     (step-register-pc! reg 2)
 
      (values `(lda-indirect-y ,(bytes-ref code (+ 1 pc))) cpu)]
     [#xb5
-     (set-register-pc! reg (+ pc 2))
+     (step-register-pc! reg 2)
 
      (values `(lda-zero-page-x ,(bytes-ref code (+ 1 pc))) cpu)]
     [#xb9
-     (set-register-pc! reg (+ pc 3))
+     (step-register-pc! reg 3)
 
      (define addr (read-abs-addr-from code (+ 1 pc)))
 
      (values (list 'lda-abs+y addr) cpu)]
     [#xbd
-     (set-register-pc! reg (+ pc 3))
+     (step-register-pc! reg 3)
 
      (define addr (read-abs-addr-from code (+ 1 pc)))
 
@@ -92,7 +98,7 @@
     [(list 'lda-imm imm)
      (lda reg imm)
 
-     (set-register-cycle! reg 2)
+     (step-register-cycle! reg 2)
 
      cpu]
     [(list 'lda-zero-page addr)
@@ -100,7 +106,8 @@
 
      (lda reg val)
 
-     (set-register-cycle! reg 3)
+     (step-register-cycle! reg 3)
+
      cpu]
     [(list 'lda-zero-page-x addr)
      (define x (register-x reg))
@@ -108,14 +115,17 @@
      (define val (bytes-ref memory (modulo (+ x addr) #xff)))
 
      (lda reg val)
-     (set-register-cycle! reg 4)
+
+     (step-register-cycle! reg 4)
+
      cpu]
     [(list 'lda-abs addr)
      (define val (bytes-ref memory addr))
 
      (lda reg val)
 
-     (set-register-cycle! reg 4)
+     (step-register-cycle! reg 4)
+
      cpu]
     [(list 'lda-abs-x base-addr)
      (define x (register-x reg))
@@ -126,7 +136,7 @@
 
      (lda reg val)
 
-     (set-register-cycle! reg (if crossed 5 4))
+     (step-register-cycle! reg (if crossed 5 4))
 
      cpu]
     [(list 'lda-indirect-x base-addr)
@@ -138,7 +148,7 @@
 
      (lda reg (bytes-ref memory memory-addr))
 
-     (set-register-cycle! reg 6)
+     (step-register-cycle! reg 6)
 
      cpu]
     [(list 'lda-indirect-y base-addr)
@@ -150,13 +160,13 @@
 
      (lda reg (bytes-ref memory addr))
 
-     (set-register-cycle! reg (if crossed 6 5))
+     (step-register-cycle! reg (if crossed 6 5))
 
      cpu]
     [(list 'ldx-imm imm)
      (ldx reg imm)
 
-     (set-register-cycle! reg 2)
+     (step-register-cycle! reg 2)
 
      cpu]))
 
