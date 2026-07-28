@@ -1,12 +1,24 @@
 #lang racket
+(require (for-syntax syntax/parse
+                     racket/syntax))
 
-(struct register (a x y pc sp z n cycle)
-  #:mutable
-  #:transparent)
+(struct register (a x y pc sp z n cycle) #:mutable #:transparent)
 
-(struct cpu (register memory)
-  #:mutable
-  #:transparent)
+(define-syntax (define-ld stx)
+  (syntax-parse stx
+    [(_ register:id)
+     #:with ld-name-id (format-id #'register "ld~a" #'register)
+     #:with set-regiser-id (format-id #'register "set-register-~a!" #'register)
+     #'(define (ld-name-id reg val)
+         (set-regiser-id reg val)
+         (set-register-z! reg (if (= val 0) 1 0))
+         (set-register-n! reg (if (neg-byte? val) 1 0)))]))
+
+(define-ld a)
+
+(define-ld x)
+
+(struct cpu (register memory) #:mutable #:transparent)
 
 (define (neg-byte? byte)
   (not (zero? (bitwise-and byte #x80))))
@@ -48,9 +60,11 @@
      (values (list 'lda-abs addr) cpu)]
     [#xb1
      (set-register-pc! reg (+ pc 2))
+
      (values `(lda-indirect-y ,(bytes-ref code (+ 1 pc))) cpu)]
     [#xb5
      (set-register-pc! reg (+ pc 2))
+
      (values `(lda-zero-page-x ,(bytes-ref code (+ 1 pc))) cpu)]
     [#xb9
      (set-register-pc! reg (+ pc 3))
@@ -63,31 +77,27 @@
 
      (define addr (read-abs-addr-from code (+ 1 pc)))
 
-     (values (list 'lda-abs-x addr) cpu)]
-    ))
+     (values (list 'lda-abs-x addr) cpu)]))
 
 (define (decode op cpu)
   (define memory (cpu-memory cpu))
-  (define reg (cpu-register cpu))
 
-  (define (lda reg val)
-    (set-register-a! reg val)
-    (set-register-z! reg (if (= val 0) 1 0))
-    (set-register-n! reg (if (neg-byte? val) 1 0)))
+  (define reg (cpu-register cpu))
 
   (match op
     [(list 'lda-imm imm)
      (lda reg imm)
+
      (set-register-cycle! reg 2)
-     cpu
-     ]
+
+     cpu]
     [(list 'lda-zero-page addr)
      (define val (bytes-ref memory addr))
 
      (lda reg val)
+
      (set-register-cycle! reg 3)
-     cpu
-     ]
+     cpu]
     [(list 'lda-zero-page-x addr)
      (define x (register-x reg))
 
@@ -95,15 +105,14 @@
 
      (lda reg val)
      (set-register-cycle! reg 4)
-     cpu
-     ]
+     cpu]
     [(list 'lda-abs addr)
      (define val (bytes-ref memory addr))
 
      (lda reg val)
+
      (set-register-cycle! reg 4)
-     cpu
-     ]
+     cpu]
     [(list 'lda-abs-x base-addr)
      (define x (register-x reg))
 
@@ -112,9 +121,10 @@
      (define val (bytes-ref memory addr))
 
      (lda reg val)
+
      (set-register-cycle! reg (if crossed 5 4))
-     cpu
-     ]
+
+     cpu]
     [(list 'lda-indirect-x base-addr)
      (define x (register-x reg))
 
@@ -123,9 +133,10 @@
      (define memory-addr (read-abs-addr-from memory addr))
 
      (lda reg (bytes-ref memory memory-addr))
+
      (set-register-cycle! reg 6)
-     cpu
-     ]
+
+     cpu]
     [(list 'lda-indirect-y base-addr)
      (define y (register-y reg))
 
@@ -137,104 +148,76 @@
 
      (set-register-cycle! reg (if crossed 6 5))
 
-     cpu
-     ]
-    )
-  )
+     cpu]))
 
 (module+ test
   (require rackunit
            rackunit/text-ui)
 
   (define (run1 code reg)
-      (call-with-values
-       (lambda ()
-         (define memory (list->bytes (for/list ([i (in-range #x10000)]) (modulo i #x100))))
+    (call-with-values (lambda ()
+                        (define memory
+                          (list->bytes (for/list ([i (in-range #x10000)])
+                                         (modulo i #x100))))
 
-         (fetch code (cpu reg memory)))
-       decode))
+                        (fetch code (cpu reg memory)))
+                      decode))
 
-  (define (lda-imm-test)
-    (test-suite
-     "LDA imm"
+  (define (lda)
+    (test-suite "LDA"
+      (test-suite "imm"
 
-     (test-case "0xff"
-       (define cpu (run1 #"\xa9\xff" (register 0 0 0 0 0 0 0 0)))
+        (test-case "0xff"
+          (define cpu (run1 #"\xa9\xff" (register 0 0 0 0 0 0 0 0)))
 
-       (check-equal? (cpu-register cpu) (register #xff 0 0 2 0 0 1 2)))
+          (check-equal? (cpu-register cpu) (register #xff 0 0 2 0 0 1 2)))
 
-     (test-case "0x00"
-       (define cpu (run1 #"\xa9\x00" (register 0 0 0 0 0 0 0 0)))
+        (test-case "0x00"
+          (define cpu (run1 #"\xa9\x00" (register 0 0 0 0 0 0 0 0)))
 
-       (check-equal? (cpu-register cpu) (register #x00 0 0 2 0 1 0 2)))))
+          (check-equal? (cpu-register cpu) (register #x00 0 0 2 0 1 0 2))))
 
-  (define (lda-zero-page)
-    (test-suite
-     "LDA zero page"
+      (test-suite "zero page"
 
-     (test-case "0x01"
-       (define cpu (run1 #"\xa5\x01" (register 0 0 0 0 0 0 0 0)))
+        (test-case "0x01"
+          (define cpu (run1 #"\xa5\x01" (register 0 0 0 0 0 0 0 0)))
 
-       (check-equal? (cpu-register cpu) (register #x01 0 0 2 0 0 0 3)))))
+          (check-equal? (cpu-register cpu) (register #x01 0 0 2 0 0 0 3))))
 
-  (define (lda-zero-page-x)
-    (test-suite
-     "LDA +x zero page"
+      (test-suite "zero page x"
+        (test-case "0x01"
+          (define cpu (run1 #"\xb5\x01" (register 0 1 0 0 0 0 0 0)))
 
-     (test-case "0x01"
-       (define cpu (run1 #"\xb5\x01" (register 0 1 0 0 0 0 0 0)))
+          (check-equal? (cpu-register cpu) (register #x02 1 0 2 0 0 0 4))))
 
-       (check-equal? (cpu-register cpu) (register #x02 1 0 2 0 0 0 4)))))
+      (test-suite "abs x"
+        (test-case "0x0001"
+          (define cpu (run1 #"\xad\x00\x01" (register 0 0 0 0 0 0 0 0)))
 
-  (define (lda-abs)
-    (test-suite
-     "LDA abs"
+          (check-equal? (cpu-register cpu) (register #x01 0 0 3 0 0 0 4))))
 
-     (test-case "0x0001"
-       (define cpu (run1 #"\xad\x00\x01" (register 0 0 0 0 0 0 0 0)))
+      (test-suite "abs y"
+        (test-case "0x0001"
+          (define cpu (run1 #"\xbd\x00\x01" (register 0 2 0 0 0 0 0 0)))
 
-       (check-equal? (cpu-register cpu) (register #x01 0 0 3 0 0 0 4)))))
+          (check-equal? (cpu-register cpu) (register #x03 2 0 3 0 0 0 4)))
 
-  (define (lda-abs-x)
-    (test-suite
-     "LDA abs"
+        (test-case "page crossed"
+          (define cpu (run1 #"\xbd\x00\xff" (register 0 2 0 0 0 0 0 0)))
 
-     (test-case "0x0001"
-       (define cpu (run1 #"\xbd\x00\x01" (register 0 2 0 0 0 0 0 0)))
+          (check-equal? (cpu-register cpu) (register #x01 2 0 3 0 0 0 5))))
 
-       (check-equal? (cpu-register cpu) (register #x03 2 0 3 0 0 0 4)))
+      (test-suite "indirect x"
+        (test-case "0x01"
+          (define cpu (run1 #"\xa1\x01" (register 0 2 0 0 0 0 0 0)))
 
-     (test-case "page crossed"
-       (define cpu (run1 #"\xbd\x00\xff" (register 0 2 0 0 0 0 0 0)))
+          (check-equal? (cpu-register cpu) (register #x04 2 0 2 0 0 0 6))))
 
-       (check-equal? (cpu-register cpu) (register #x01 2 0 3 0 0 0 5)))))
+      (test-suite "indirect y"
+        (test-case "0x01"
+          (define cpu (run1 #"\xb1\x01" (register 0 0 3 0 0 0 0 0)))
 
-  (define (lda-indirect-x)
-    (test-suite
-     "LDA abs"
+          (check-equal? (cpu-register cpu) (register #x05 0 3 2 0 0 0 5))))))
 
-     (test-case "0x01"
-       (define cpu (run1 #"\xa1\x01" (register 0 2 0 0 0 0 0 0)))
-
-       (check-equal? (cpu-register cpu) (register #x04 2 0 2 0 0 0 6)))))
-
-  (define (lda-indirect-y)
-    (test-suite
-     "LDA abs"
-
-     (test-case "0x01"
-       (define cpu (run1 #"\xb1\x01" (register 0 0 3 0 0 0 0 0)))
-
-       (check-equal? (cpu-register cpu) (register #x05 0 3 2 0 0 0 5)))))
-
-  (run-tests
-   (test-suite
-    "run all"
-    (lda-imm-test)
-    (lda-zero-page)
-    (lda-zero-page-x)
-    (lda-abs)
-    (lda-abs-x)
-    (lda-indirect-x)
-    (lda-indirect-y)))
-)
+  (run-tests (test-suite "run all"
+               (lda))))
