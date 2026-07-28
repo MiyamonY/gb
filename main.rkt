@@ -46,6 +46,9 @@
      (define addr (read-abs-addr-from code (+ 1 pc)))
 
      (values (list 'lda-abs addr) cpu)]
+    [#xb1
+     (set-register-pc! reg (+ pc 2))
+     (values `(lda-indirect-y ,(bytes-ref code (+ 1 pc))) cpu)]
     [#xb5
      (set-register-pc! reg (+ pc 2))
      (values `(lda-zero-page-x ,(bytes-ref code (+ 1 pc))) cpu)]
@@ -123,7 +126,19 @@
      (set-register-cycle! reg 6)
      cpu
      ]
+    [(list 'lda-indirect-y base-addr)
+     (define y (register-y reg))
 
+     (define memory-addr (read-abs-addr-from memory base-addr))
+
+     (define-values (addr crossed) (add-addr memory-addr y))
+
+     (lda reg (bytes-ref memory addr))
+
+     (set-register-cycle! reg (if crossed 6 5))
+
+     cpu
+     ]
     )
   )
 
@@ -203,6 +218,15 @@
 
        (check-equal? (cpu-register cpu) (register #x04 2 0 2 0 0 0 6)))))
 
+  (define (lda-indirect-y)
+    (test-suite
+     "LDA abs"
+
+     (test-case "0x01"
+       (define cpu (run1 #"\xb1\x01" (register 0 0 3 0 0 0 0 0)))
+
+       (check-equal? (cpu-register cpu) (register #x05 0 3 2 0 0 0 5)))))
+
   (run-tests
    (test-suite
     "run all"
@@ -211,5 +235,6 @@
     (lda-zero-page-x)
     (lda-abs)
     (lda-abs-x)
-    (lda-indirect-x)))
+    (lda-indirect-x)
+    (lda-indirect-y)))
 )
