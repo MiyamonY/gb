@@ -44,6 +44,10 @@
      (set-register-pc! reg (+ pc 2))
 
      (values `(lda-indirect-x ,(bytes-ref code (+ 1 pc))) cpu)]
+    [#xa2
+     (set-register-pc! reg (+ pc 2))
+
+     (values `(ldx-imm ,(bytes-ref code (+ 1 pc))) cpu)]
     [#xa5
      (set-register-pc! reg (+ pc 2))
 
@@ -148,6 +152,12 @@
 
      (set-register-cycle! reg (if crossed 6 5))
 
+     cpu]
+    [(list 'ldx-imm imm)
+     (ldx reg imm)
+
+     (set-register-cycle! reg 2)
+
      cpu]))
 
 (module+ test
@@ -219,5 +229,14 @@
 
           (check-equal? (cpu-register cpu) (register #x05 0 3 2 0 0 0 5))))))
 
+  (define (ldx)
+    (test-suite "LDX"
+      (test-suite "imm"
+        (test-case "0xff"
+          (define cpu (run1 #"\xa2\xff" (register 0 0 0 0 0 0 0 0)))
+
+          (check-equal? (cpu-register cpu) (register 0 #xff 0 2 0 0 1 2))))))
+
   (run-tests (test-suite "run all"
-               (lda))))
+               (lda)
+               (ldx))))
