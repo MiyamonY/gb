@@ -58,6 +58,10 @@
      (step-register-pc! reg 2)
 
      (values `(lda-zero-page ,(bytes-ref code (+ 1 pc))) cpu)]
+    [#xa6
+     (step-register-pc! reg 2)
+
+     (values `(ldx-zero-page ,(bytes-ref code (+ 1 pc))) cpu)]
     [#xa9
      (step-register-pc! reg 2)
 
@@ -68,6 +72,12 @@
      (define addr (read-abs-addr-from code (+ 1 pc)))
 
      (values (list 'lda-abs addr) cpu)]
+    [#xae
+     (step-register-pc! reg 3)
+
+     (define addr (read-abs-addr-from code (+ 1 pc)))
+
+     (values (list 'ldx-abs addr) cpu)]
     [#xb1
      (step-register-pc! reg 2)
 
@@ -76,18 +86,29 @@
      (step-register-pc! reg 2)
 
      (values `(lda-zero-page-x ,(bytes-ref code (+ 1 pc))) cpu)]
+    [#xb6
+     (step-register-pc! reg 2)
+
+     (values `(ldx-zero-page-y ,(bytes-ref code (+ 1 pc))) cpu)]
     [#xb9
      (step-register-pc! reg 3)
 
      (define addr (read-abs-addr-from code (+ 1 pc)))
 
-     (values (list 'lda-abs+y addr) cpu)]
+     (values (list 'lda-abs-y addr) cpu)]
     [#xbd
      (step-register-pc! reg 3)
 
      (define addr (read-abs-addr-from code (+ 1 pc)))
 
-     (values (list 'lda-abs-x addr) cpu)]))
+     (values (list 'lda-abs-x addr) cpu)]
+    [#xbe
+     (step-register-pc! reg 3)
+
+     (define addr (read-abs-addr-from code (+ 1 pc)))
+
+     (values (list 'ldx-abs-y addr) cpu)]
+    [_ (error 'invalid-op-code "invalid op code: #x~x" op-code)]))
 
 (define (decode op cpu)
   (define memory (cpu-memory cpu))
@@ -139,6 +160,18 @@
      (step-register-cycle! reg (if crossed 5 4))
 
      cpu]
+    [(list 'lda-abs-y base-addr)
+     (define y (register-y reg))
+
+     (define-values (addr crossed) (add-addr base-addr y))
+
+     (define val (bytes-ref memory addr))
+
+     (lda reg val)
+
+     (step-register-cycle! reg (if crossed 5 4))
+
+     cpu]
     [(list 'lda-indirect-x base-addr)
      (define x (register-x reg))
 
@@ -168,7 +201,46 @@
 
      (step-register-cycle! reg 2)
 
-     cpu]))
+     cpu]
+    [(list 'ldx-zero-page addr)
+     (define val (bytes-ref memory addr))
+
+     (ldx reg val)
+
+     (step-register-cycle! reg 3)
+
+     cpu]
+    [(list 'ldx-zero-page-y addr)
+     (define y (register-y reg))
+
+     (define val (bytes-ref memory (modulo (+ y addr) #xff)))
+
+     (ldx reg val)
+
+     (step-register-cycle! reg 4)
+
+     cpu]
+    [(list 'ldx-abs addr)
+     (define val (bytes-ref memory addr))
+
+     (ldx reg val)
+
+     (step-register-cycle! reg 4)
+
+     cpu]
+    [(list 'ldx-abs-y base-addr)
+     (define y (register-y reg))
+
+     (define-values (addr crossed) (add-addr base-addr y))
+
+     (define val (bytes-ref memory addr))
+
+     (ldx reg val)
+
+     (step-register-cycle! reg (if crossed 5 4))
+
+     cpu]
+    [(list instruction _ ...) (error 'invalid-instruction "~a" instruction)]))
 
 (module+ test
   (require rackunit
@@ -186,7 +258,6 @@
   (define (lda)
     (test-suite "LDA"
       (test-suite "imm"
-
         (test-case "0xff"
           (define cpu (run1 #"\xa9\xff" (register 0 0 0 0 0 0 0 0)))
 
@@ -198,7 +269,6 @@
           (check-equal? (cpu-register cpu) (register #x00 0 0 2 0 1 0 2))))
 
       (test-suite "zero page"
-
         (test-case "0x01"
           (define cpu (run1 #"\xa5\x01" (register 0 0 0 0 0 0 0 0)))
 
@@ -210,13 +280,13 @@
 
           (check-equal? (cpu-register cpu) (register #x02 1 0 2 0 0 0 4))))
 
-      (test-suite "abs x"
+      (test-suite "abs"
         (test-case "0x0001"
           (define cpu (run1 #"\xad\x00\x01" (register 0 0 0 0 0 0 0 0)))
 
           (check-equal? (cpu-register cpu) (register #x01 0 0 3 0 0 0 4))))
 
-      (test-suite "abs y"
+      (test-suite "abs x"
         (test-case "0x0001"
           (define cpu (run1 #"\xbd\x00\x01" (register 0 2 0 0 0 0 0 0)))
 
@@ -226,6 +296,17 @@
           (define cpu (run1 #"\xbd\x00\xff" (register 0 2 0 0 0 0 0 0)))
 
           (check-equal? (cpu-register cpu) (register #x01 2 0 3 0 0 0 5))))
+
+      (test-suite "abs y"
+        (test-case "0x0001"
+          (define cpu (run1 #"\xb9\x00\x01" (register 0 0 2 0 0 0 0 0)))
+
+          (check-equal? (cpu-register cpu) (register #x03 0 2 3 0 0 0 4)))
+
+        (test-case "page crossed"
+          (define cpu (run1 #"\xb9\x00\xff" (register 0 0 2 0 0 0 0 0)))
+
+          (check-equal? (cpu-register cpu) (register #x01 0 2 3 0 0 0 5))))
 
       (test-suite "indirect x"
         (test-case "0x01"
@@ -245,7 +326,36 @@
         (test-case "0xff"
           (define cpu (run1 #"\xa2\xff" (register 0 0 0 0 0 0 0 0)))
 
-          (check-equal? (cpu-register cpu) (register 0 #xff 0 2 0 0 1 2))))))
+          (check-equal? (cpu-register cpu) (register 0 #xff 0 2 0 0 1 2))))
+
+      (test-suite "zero page"
+        (test-case "0x01"
+          (define cpu (run1 #"\xa6\x01" (register 0 0 0 0 0 0 0 0)))
+
+          (check-equal? (cpu-register cpu) (register 0 #x01 0 2 0 0 0 3))))
+
+      (test-suite "zero page y"
+        (test-case "0x01"
+          (define cpu (run1 #"\xb6\x01" (register 0 0 1 0 0 0 0 0)))
+
+          (check-equal? (cpu-register cpu) (register 0 #x02 1 2 0 0 0 4))))
+
+      (test-suite "abs"
+        (test-case "0x0001"
+          (define cpu (run1 #"\xae\x00\x01" (register 0 0 0 0 0 0 0 0)))
+
+          (check-equal? (cpu-register cpu) (register 0 #x01 0 3 0 0 0 4))))
+
+      (test-suite "abs y"
+        (test-case "0x0001"
+          (define cpu (run1 #"\xbe\x00\x01" (register 0 0 2 0 0 0 0 0)))
+
+          (check-equal? (cpu-register cpu) (register 0 #x03 2 3 0 0 0 4)))
+
+        (test-case "page crossed"
+          (define cpu (run1 #"\xbe\x00\xff" (register 0 0 2 0 0 0 0 0)))
+
+          (check-equal? (cpu-register cpu) (register 0 #x01 2 3 0 0 0 5))))))
 
   (run-tests (test-suite "run all"
                (lda)
