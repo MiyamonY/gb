@@ -24,6 +24,11 @@
   (set-register-z! reg (if (= val 0) 1 0))
   (set-register-n! reg (if (neg-byte? val) 1 0)))
 
+(define (ldy reg val)
+  (set-register-y! reg val)
+  (set-register-z! reg (if (= val 0) 1 0))
+  (set-register-n! reg (if (neg-byte? val) 1 0)))
+
 (struct cpu (register memory) #:mutable #:transparent)
 
 (define (neg-byte? byte)
@@ -46,6 +51,10 @@
   (define op-code (bytes-ref code pc))
 
   (match op-code
+    [#xa0
+     (step-register-pc! reg 2)
+
+     (values `(ldy-imm ,(bytes-ref code (+ 1 pc))) cpu)]
     [#xa1
      (step-register-pc! reg 2)
 
@@ -54,6 +63,10 @@
      (step-register-pc! reg 2)
 
      (values `(ldx-imm ,(bytes-ref code (+ 1 pc))) cpu)]
+    [#xa4
+     (step-register-pc! reg 2)
+
+     (values `(ldy-zero-page ,(bytes-ref code (+ 1 pc))) cpu)]
     [#xa5
      (step-register-pc! reg 2)
 
@@ -66,6 +79,12 @@
      (step-register-pc! reg 2)
 
      (values `(lda-imm ,(bytes-ref code (+ 1 pc))) cpu)]
+    [#xac
+     (step-register-pc! reg 3)
+
+     (define addr (read-abs-addr-from code (+ 1 pc)))
+
+     (values (list 'ldy-abs addr) cpu)]
     [#xad
      (step-register-pc! reg 3)
 
@@ -82,6 +101,10 @@
      (step-register-pc! reg 2)
 
      (values `(lda-indirect-y ,(bytes-ref code (+ 1 pc))) cpu)]
+    [#xb4
+     (step-register-pc! reg 2)
+
+     (values `(ldy-zero-page-x ,(bytes-ref code (+ 1 pc))) cpu)]
     [#xb5
      (step-register-pc! reg 2)
 
@@ -96,6 +119,12 @@
      (define addr (read-abs-addr-from code (+ 1 pc)))
 
      (values (list 'lda-abs-y addr) cpu)]
+    [#xbc
+     (step-register-pc! reg 3)
+
+     (define addr (read-abs-addr-from code (+ 1 pc)))
+
+     (values (list 'ldy-abs-x addr) cpu)]
     [#xbd
      (step-register-pc! reg 3)
 
@@ -240,6 +269,50 @@
      (step-register-cycle! reg (if crossed 5 4))
 
      cpu]
+    [(list 'ldy-imm imm)
+     (ldy reg imm)
+
+     (step-register-cycle! reg 2)
+
+     cpu]
+    [(list 'ldy-zero-page addr)
+     (define val (bytes-ref memory addr))
+
+     (ldy reg val)
+
+     (step-register-cycle! reg 3)
+
+     cpu]
+    [(list 'ldy-zero-page-x addr)
+     (define x (register-x reg))
+
+     (define val (bytes-ref memory (modulo (+ x addr) #xff)))
+
+     (ldy reg val)
+
+     (step-register-cycle! reg 4)
+
+     cpu]
+    [(list 'ldy-abs addr)
+     (define val (bytes-ref memory addr))
+
+     (ldy reg val)
+
+     (step-register-cycle! reg 4)
+
+     cpu]
+    [(list 'ldy-abs-x base-addr)
+     (define x (register-x reg))
+
+     (define-values (addr crossed) (add-addr base-addr x))
+
+     (define val (bytes-ref memory addr))
+
+     (ldy reg val)
+
+     (step-register-cycle! reg (if crossed 5 4))
+
+     cpu]
     [(list instruction _ ...) (error 'invalid-instruction "~a" instruction)]))
 
 (module+ test
@@ -357,6 +430,44 @@
 
           (check-equal? (cpu-register cpu) (register 0 #x01 2 3 0 0 0 5))))))
 
+  (define (ldy)
+    (test-suite "LDY"
+      (test-suite "imm"
+        (test-case "0xff"
+          (define cpu (run1 #"\xa0\xff" (register 0 0 0 0 0 0 0 0)))
+
+          (check-equal? (cpu-register cpu) (register 0 0 #xff 2 0 0 1 2))))
+
+      (test-suite "zero page"
+        (test-case "0x01"
+          (define cpu (run1 #"\xa4\x01" (register 0 0 0 0 0 0 0 0)))
+
+          (check-equal? (cpu-register cpu) (register 0 0 #x01 2 0 0 0 3))))
+
+      (test-suite "zero page x"
+        (test-case "0x01"
+          (define cpu (run1 #"\xb4\x01" (register 0 1 0 0 0 0 0 0)))
+
+          (check-equal? (cpu-register cpu) (register 0 1 #x02 2 0 0 0 4))))
+
+      (test-suite "abs"
+        (test-case "0x0001"
+          (define cpu (run1 #"\xac\x00\x01" (register 0 0 0 0 0 0 0 0)))
+
+          (check-equal? (cpu-register cpu) (register 0 0 #x01 3 0 0 0 4))))
+
+      (test-suite "abs x"
+        (test-case "0x0001"
+          (define cpu (run1 #"\xbc\x00\x01" (register 0 2 0 0 0 0 0 0)))
+
+          (check-equal? (cpu-register cpu) (register 0 2 #x03 3 0 0 0 4))))
+
+        (test-case "page crossed"
+          (define cpu (run1 #"\xbc\x00\xff" (register 0 2 0 0 0 0 0 0)))
+
+          (check-equal? (cpu-register cpu) (register 0 2 #x01 3 0 0 0 5)))))
+
   (run-tests (test-suite "run all"
                (lda)
-               (ldx))))
+               (ldx)
+               (ldy))))
