@@ -4,58 +4,80 @@
 
 (struct register (a x y pc sp z n cycle) #:mutable #:transparent)
 
-(define (step-register-cycle! register diff)
+(define/contract (step-register-cycle! register diff)
+  (-> register? (integer-in 1 10) void)
   (define cycle (register-cycle register))
 
   (set-register-cycle! register (+ cycle diff)))
 
-(define (step-register-pc! register diff)
+(define/contract (step-register-pc! register diff)
+  (-> register? (integer-in 1 3) void)
+
   (define pc (register-pc register))
 
   (set-register-pc! register (+ pc diff)))
 
-(define (lda reg val)
+(define/contract (lda reg val)
+  (-> register? (integer-in 0 #xff) void)
+
   (set-register-a! reg val)
   (set-register-z! reg (if (= val 0) 1 0))
   (set-register-n! reg (if (neg-byte? val) 1 0)))
 
-(define (ldx reg val)
+(define/contract (ldx reg val)
+  (-> register? (integer-in 0 #xff) void)
   (set-register-x! reg val)
   (set-register-z! reg (if (= val 0) 1 0))
   (set-register-n! reg (if (neg-byte? val) 1 0)))
 
-(define (ldy reg val)
+(define/contract (ldy reg val)
+  (-> register? (integer-in 0 #xff) void)
+
   (set-register-y! reg val)
   (set-register-z! reg (if (= val 0) 1 0))
   (set-register-n! reg (if (neg-byte? val) 1 0)))
 
 (struct cpu (register memory) #:mutable #:transparent)
 
-(define (neg-byte? byte)
+(define/contract (neg-byte? byte)
+  (-> (integer-in #x00 #xff) boolean?)
+
   (not (zero? (bitwise-and byte #x80))))
 
-(define (page-crossed? addr1 addr2)
+(define/contract (page-crossed? addr1 addr2)
+  (-> (integer-in 0 #xffff) (integer-in 0 #xffff) boolean?)
+
   (not (zero? (bitwise-and (bitwise-xor addr1 addr2) #xFF00))))
 
-(define (add-addr base diff)
+(define/contract (add-addr base diff)
+  (-> integer? integer? (values (integer-in 0 #xffff) boolean?))
+
   (define addr (+ base diff))
 
   (values (modulo addr #x10000) (page-crossed? base addr)))
 
-(define (read-abs-addr-from code-or-memory from)
+(define/contract (read-abs-addr-from code-or-memory from)
+  (-> bytes? integer? integer?)
+
   (+ (arithmetic-shift (bytes-ref code-or-memory from) 8) (bytes-ref code-or-memory (+ 1 from))))
 
-(define (write-to-memory cpu start bytes)
+(define/contract (write-to-memory cpu start bytes)
+  (-> cpu? integer? bytes? void?)
+
   (define memory (cpu-memory cpu))
 
   (bytes-copy! memory start bytes))
 
-(define (read-from-memory cpu start size)
+(define/contract (read-from-memory cpu start size)
+  (-> cpu? integer? integer? bytes?)
+
   (define memory (cpu-memory cpu))
 
   (subbytes memory start (+ start size)))
 
-(define (fetch code cpu)
+(define/contract (fetch code cpu)
+  (-> bytes? cpu? (values any/c cpu?))
+
   (define reg (cpu-register cpu))
   (define pc (register-pc reg))
   (define op-code (bytes-ref code pc))
@@ -183,7 +205,9 @@
      (values (list 'ldx-abs-y addr) cpu)]
     [_ (error 'invalid-op-code "invalid op code: #x~x" op-code)]))
 
-(define (decode op cpu)
+(define/contract (decode op cpu)
+  (-> any/c cpu? void)
+
   (define memory (cpu-memory cpu))
 
   (define reg (cpu-register cpu))
