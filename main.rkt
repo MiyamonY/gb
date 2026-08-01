@@ -45,16 +45,23 @@
   (not (zero? (bitwise-and byte #x80))))
 
 (define/contract (page-crossed? addr1 addr2)
-  (-> (integer-in 0 #xffff) (integer-in 0 #xffff) boolean?)
+  (-> (integer-in 0 #x10000) (integer-in 0 #x20000) boolean?)
 
   (not (zero? (bitwise-and (bitwise-xor addr1 addr2) #xFF00))))
 
 (define/contract (add-addr base diff)
-  (-> integer? integer? (values (integer-in 0 #xffff) boolean?))
+  (-> (integer-in 0 #xffff) (integer-in 0 #xffff) (values (integer-in 0 #xffff) boolean?))
 
   (define addr (+ base diff))
 
   (values (modulo addr #x10000) (page-crossed? base addr)))
+
+(define/contract (add-addr-in-zero-page base diff)
+  (-> (integer-in 0 #x00ff) (integer-in 0 #xff) (values (integer-in 0 #x00ff) boolean?))
+
+  (define addr (+ base diff))
+
+  (values (modulo addr #x0100) (page-crossed? base addr)))
 
 (define/contract (read-abs-addr-from code-or-memory from)
   (-> bytes? integer? integer?)
@@ -394,7 +401,7 @@
 
      (define x (register-x reg))
 
-     (define-values (zero-page-addr _) (add-addr x addr))
+     (define-values (zero-page-addr _) (add-addr-in-zero-page x addr))
 
      (write-to-memory cpu zero-page-addr (bytes a))
 
@@ -414,7 +421,9 @@
 
      (define x (register-x reg))
 
-     (write-to-memory cpu (+ addr x) (bytes a))
+     (define-values (abs-addr _) (add-addr addr x))
+
+     (write-to-memory cpu abs-addr (bytes a))
 
      (step-register-cycle! reg 4)
 
@@ -424,7 +433,9 @@
 
      (define y (register-y reg))
 
-     (write-to-memory cpu (+ addr y) (bytes a))
+     (define-values (abs-addr _) (add-addr addr y))
+
+     (write-to-memory cpu abs-addr (bytes a))
 
      (step-register-cycle! reg 4)
 
@@ -434,7 +445,7 @@
 
      (define x (register-x reg))
 
-     (define-values (indirect-addr _) (add-addr addr x))
+     (define-values (indirect-addr _) (add-addr-in-zero-page addr x))
 
      (write-to-memory cpu (read-abs-addr-from memory indirect-addr) (bytes a))
 
@@ -448,7 +459,9 @@
 
      (define abs-addr (read-abs-addr-from memory addr))
 
-     (write-to-memory cpu (+ abs-addr y) (bytes a))
+     (define-values (added-addr _) (add-addr abs-addr y))
+
+     (write-to-memory cpu added-addr (bytes a))
 
      (step-register-cycle! reg 6)
 
@@ -623,7 +636,14 @@
 
           (check-equal? (cpu-register cpu) (register #xff 1 0 2 0 0 0 4))
 
-          (check-equal? (read-from-memory cpu #x02 1) #"\xff")))
+          (check-equal? (read-from-memory cpu #x02 1) #"\xff"))
+
+        (test-case "overflow"
+          (define cpu (run1 #"\x95\xff" (register #xff 1 0 0 0 0 0 0)))
+
+          (check-equal? (cpu-register cpu) (register #xff 1 0 2 0 0 0 4))
+
+          (check-equal? (read-from-memory cpu #x00 1) #"\xff")))
 
       (test-suite "abs"
         (test-case "0x0001"
@@ -639,7 +659,14 @@
 
           (check-equal? (cpu-register cpu) (register #xff #x01 0 3 0 0 0 4))
 
-          (check-equal? (read-from-memory cpu #x0002 1) #"\xff")))
+          (check-equal? (read-from-memory cpu #x0002 1) #"\xff"))
+
+        (test-case "overflow"
+          (define cpu (run1 #"\x9d\xff\xff" (register #xff #x02 0 0 0 0 0 0)))
+
+          (check-equal? (cpu-register cpu) (register #xff #x02 0 3 0 0 0 4))
+
+          (check-equal? (read-from-memory cpu #x0001 1) #"\xff")))
 
       (test-suite "abs y"
         (test-case "0x0001"
@@ -647,7 +674,14 @@
 
           (check-equal? (cpu-register cpu) (register #xff 0 #x01 3 0 0 0 4))
 
-          (check-equal? (read-from-memory cpu #x0002 1) #"\xff")))
+          (check-equal? (read-from-memory cpu #x0002 1) #"\xff"))
+
+        (test-case "overflow"
+          (define cpu (run1 #"\x99\xff\xff" (register #xff 0 #x02 0 0 0 0 0)))
+
+          (check-equal? (cpu-register cpu) (register #xff 0 #x02 3 0 0 0 4))
+
+          (check-equal? (read-from-memory cpu #x0001 1) #"\xff")))
 
       (test-suite "indirect x"
         (test-case "0x01"
@@ -662,7 +696,7 @@
 
           (check-equal? (cpu-register cpu) (register #xff #x01 0 2 0 0 0 6))
 
-          (check-equal? (read-from-memory cpu #x0001 1) #"\xff")))
+          (check-equal? (read-from-memory cpu #x01 1) #"\xff")))
 
       (test-suite "indirect y"
         (test-case "0x01"
