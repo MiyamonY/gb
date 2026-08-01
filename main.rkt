@@ -98,12 +98,22 @@
      (step-register-pc! reg 2)
 
      (values `(sta-zero-page ,(bytes-ref code (+ 1 pc))) cpu)]
+    [#x86
+     (step-register-pc! reg 2)
+
+     (values `(stx-zero-page ,(bytes-ref code (+ 1 pc))) cpu)]
     [#x8d
      (step-register-pc! reg 3)
 
      (define addr (read-abs-addr-from code (+ 1 pc)))
 
      (values (list 'sta-abs addr) cpu)]
+    [#x8e
+     (step-register-pc! reg 3)
+
+     (define addr (read-abs-addr-from code (+ 1 pc)))
+
+     (values (list 'stx-abs addr) cpu)]
     [#x91
      (step-register-pc! reg 2)
 
@@ -112,6 +122,10 @@
      (step-register-pc! reg 2)
 
      (values `(sta-zero-page-x ,(bytes-ref code (+ 1 pc))) cpu)]
+    [#x96
+     (step-register-pc! reg 2)
+
+     (values `(stx-zero-page-y ,(bytes-ref code (+ 1 pc))) cpu)]
     [#x99
      (step-register-pc! reg 3)
 
@@ -466,6 +480,34 @@
      (step-register-cycle! reg 6)
 
      cpu]
+    [(list 'stx-zero-page addr)
+     (define x (register-x reg))
+
+     (write-to-memory cpu addr (bytes x))
+
+     (step-register-cycle! reg 3)
+
+     cpu]
+    [(list 'stx-zero-page-y addr)
+     (define x (register-x reg))
+
+     (define y (register-y reg))
+
+     (define-values (addr-in-zero-page _) (add-addr-in-zero-page addr y))
+
+     (write-to-memory cpu addr-in-zero-page (bytes x))
+
+     (step-register-cycle! reg 4)
+
+     cpu]
+    [(list 'stx-abs addr)
+     (define x (register-x reg))
+
+     (write-to-memory cpu addr (bytes x))
+
+     (step-register-cycle! reg 4)
+
+     cpu]
     [(list instruction _ ...) (error 'invalid-instruction "~a" instruction)]))
 
 (module+ test
@@ -715,8 +757,42 @@
 
           (check-equal? (read-from-memory cpu #xffff 1) #"\xff")))))
 
+  (define (stx)
+    (test-suite "STX"
+      (test-suite "zero page"
+        (test-case "0x01"
+          (define cpu (run1 #"\x86\x01" (register 0 #xff 0 0 0 0 0 0)))
+
+          (check-equal? (cpu-register cpu) (register 0 #xff 0 2 0 0 0 3))
+
+          (check-equal? (read-from-memory cpu #x01 1) #"\xff")))
+
+      (test-suite "zero page y"
+        (test-case "0x01"
+          (define cpu (run1 #"\x96\x01" (register 0 #xff 1 0 0 0 0 0)))
+
+          (check-equal? (cpu-register cpu) (register 0 #xff 1 2 0 0 0 4))
+
+          (check-equal? (read-from-memory cpu #x02 1) #"\xff"))
+
+        (test-case "overflow"
+          (define cpu (run1 #"\x96\xff" (register 0 #xff 1 0 0 0 0 0)))
+
+          (check-equal? (cpu-register cpu) (register 0 #xff 1 2 0 0 0 4))
+
+          (check-equal? (read-from-memory cpu #x00 1) #"\xff")))
+
+      (test-suite "abs"
+        (test-case "0x0001"
+          (define cpu (run1 #"\x8e\x00\x01" (register 0 #xff 0 0 0 0 0 0)))
+
+          (check-equal? (cpu-register cpu) (register 0 #xff 0 3 0 0 0 4))
+
+          (check-equal? (read-from-memory cpu #x0001 1) #"\xff")))))
+
   (run-tests (test-suite "run all"
                (lda)
                (ldx)
                (ldy)
-               (sta))))
+               (sta)
+               (stx))))
