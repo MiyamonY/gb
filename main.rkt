@@ -94,6 +94,10 @@
      (step-register-pc! reg 2)
 
      (values `(sta-indirect-x ,(bytes-ref code (+ 1 pc))) cpu)]
+    [#x84
+     (step-register-pc! reg 2)
+
+     (values `(sty-zero-page ,(bytes-ref code (+ 1 pc))) cpu)]
     [#x85
      (step-register-pc! reg 2)
 
@@ -102,6 +106,12 @@
      (step-register-pc! reg 2)
 
      (values `(stx-zero-page ,(bytes-ref code (+ 1 pc))) cpu)]
+    [#x8c
+     (step-register-pc! reg 3)
+
+     (define addr (read-abs-addr-from code (+ 1 pc)))
+
+     (values (list 'sty-abs addr) cpu)]
     [#x8d
      (step-register-pc! reg 3)
 
@@ -118,6 +128,10 @@
      (step-register-pc! reg 2)
 
      (values `(sta-indirect-y ,(bytes-ref code (+ 1 pc))) cpu)]
+    [#x94
+     (step-register-pc! reg 2)
+
+     (values `(sty-zero-page-x ,(bytes-ref code (+ 1 pc))) cpu)]
     [#x95
      (step-register-pc! reg 2)
 
@@ -508,6 +522,34 @@
      (step-register-cycle! reg 4)
 
      cpu]
+    [(list 'sty-zero-page addr)
+     (define y (register-y reg))
+
+     (write-to-memory cpu addr (bytes y))
+
+     (step-register-cycle! reg 3)
+
+     cpu]
+    [(list 'sty-zero-page-x addr)
+     (define x (register-x reg))
+
+     (define y (register-y reg))
+
+     (define-values (addr-in-zero-page _) (add-addr-in-zero-page addr x))
+
+     (write-to-memory cpu addr-in-zero-page (bytes y))
+
+     (step-register-cycle! reg 4)
+
+     cpu]
+    [(list 'sty-abs addr)
+     (define y (register-y reg))
+
+     (write-to-memory cpu addr (bytes y))
+
+     (step-register-cycle! reg 4)
+
+     cpu]
     [(list instruction _ ...) (error 'invalid-instruction "~a" instruction)]))
 
 (module+ test
@@ -790,9 +832,43 @@
 
           (check-equal? (read-from-memory cpu #x0001 1) #"\xff")))))
 
+  (define (sty)
+    (test-suite "STY"
+      (test-suite "zero page"
+        (test-case "0x01"
+          (define cpu (run1 #"\x84\x01" (register 0 0 #xff 0 0 0 0 0)))
+
+          (check-equal? (cpu-register cpu) (register 0 0 #xff 2 0 0 0 3))
+
+          (check-equal? (read-from-memory cpu #x01 1) #"\xff"))))
+
+    (test-suite "zero page x"
+      (test-case "0x01"
+        (define cpu (run1 #"\x94\x01" (register 0 1 #xff 0 0 0 0 0)))
+
+        (check-equal? (cpu-register cpu) (register 0 1 #xff 2 0 0 0 4))
+
+        (check-equal? (read-from-memory cpu #x02 1) #"\xff"))
+
+      (test-case "overflow"
+        (define cpu (run1 #"\x94\xff" (register 0 1 #xff 0 0 0 0 0)))
+
+        (check-equal? (cpu-register cpu) (register 0 1 #xff 2 0 0 0 4))
+
+        (check-equal? (read-from-memory cpu #x00 1) #"\xff")))
+
+    (test-suite "abs"
+      (test-case "0x0001"
+        (define cpu (run1 #"\x8c\x00\x01" (register 0 0 #xff 0 0 0 0 0)))
+
+        (check-equal? (cpu-register cpu) (register 0 0 #xff 3 0 0 0 4))
+
+        (check-equal? (read-from-memory cpu #x0001 1) #"\xff"))))
+
   (run-tests (test-suite "run all"
                (lda)
                (ldx)
                (ldy)
                (sta)
-               (stx))))
+               (stx)
+               (sty))))
